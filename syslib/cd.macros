@@ -1,0 +1,173 @@
+ macro
+&l ph2 &n1
+&l anop
+ aif "&n1"="*",.f
+ lclc &c
+&c amid &n1,1,1
+ aif "&c"="#",.d
+ aif s:longa=1,.a
+ rep #%00100000
+.a
+ aif "&c"<>"{",.b
+&c amid &n1,l:&n1,1
+ aif "&c"<>"}",.g
+&n1 amid &n1,2,l:&n1-2
+ lda (&n1)
+ pha
+ ago .e
+.b
+ aif "&c"="<",.c
+ lda &n1
+ pha
+ ago .e
+.c
+&n1 amid &n1,2,l:&n1-1
+ pei &n1
+ ago .e
+.d
+&n1 amid &n1,2,l:&n1-1
+ pea &n1
+ ago .f
+.e
+ aif s:longa=1,.f
+ sep #%00100000
+.f
+ mexit
+.g
+ mnote "Missing closing '}'",16
+ mend
+ MACRO
+&LAB BGT &BP
+&LAB BEQ *+4
+ BGE &BP
+ MEND
+ MACRO
+&LAB LONG &A,&B
+ LCLB &I
+ LCLB &M
+&A AMID &A,1,1
+&M SETB "&A"="M"
+&I SETB "&A"="I"
+ AIF C:&B=0,.A
+&B AMID &B,1,1
+&M SETB ("&B"="M").OR.&M
+&I SETB ("&B"="I").OR.&I
+.A
+&LAB REP #&M*32+&I*16
+ AIF .NOT.&M,.B
+ LONGA ON
+.B
+ AIF .NOT.&I,.C
+ LONGI ON
+.C
+ MEND
+ MACRO
+&LAB SHORT &A,&B
+ LCLB &I
+ LCLB &M
+&A AMID &A,1,1
+&M SETB "&A"="M"
+&I SETB "&A"="I"
+ AIF C:&B=0,.A
+&B AMID &B,1,1
+&M SETB ("&B"="M").OR.&M
+&I SETB ("&B"="I").OR.&I
+.A
+&LAB SEP #&M*32+&I*16
+ AIF .NOT.&M,.B
+ LONGA OFF
+.B
+ AIF .NOT.&I,.C
+ LONGI OFF
+.C
+ MEND
+ MACRO
+&LAB _SYSBEEP
+&LAB LDX #$2C03
+ JSL $E10000
+ MEND
+ MACRO
+&LAB _SETINGLOBALS
+&LAB LDX #$090C
+ JSL $E10000
+ MEND
+ MACRO
+&LAB _SETOUTGLOBALS
+&LAB LDX #$0A0C
+ JSL $E10000
+ MEND
+ MACRO
+&LAB _SETERRGLOBALS
+&LAB LDX #$0B0C
+ JSL $E10000
+ MEND
+ MACRO
+&LAB _GETINGLOBALS
+&LAB LDX #$0C0C
+ JSL $E10000
+ MEND
+ MACRO
+&LAB _GETOUTGLOBALS
+&LAB LDX #$0D0C
+ JSL $E10000
+ MEND
+ MACRO
+&LAB _GETERRGLOBALS
+&LAB LDX #$0E0C
+ JSL $E10000
+ MEND
+ MACRO
+&LAB _SETINPUTDEVICE
+&LAB LDX #$0F0C
+ JSL $E10000
+ MEND
+ MACRO
+&LAB _SETOUTPUTDEVICE
+&LAB LDX #$100C
+ JSL $E10000
+ MEND
+ MACRO
+&LAB _SETERRORDEVICE
+&LAB LDX #$110C
+ JSL $E10000
+ MEND
+ MACRO
+&LAB _GETINPUTDEVICE
+&LAB LDX #$120C
+ JSL $E10000
+ MEND
+ MACRO
+&LAB _GETOUTPUTDEVICE
+&LAB LDX #$130C
+ JSL $E10000
+ MEND
+ MACRO
+&LAB _GETERRORDEVICE
+&LAB LDX #$140C
+ JSL $E10000
+ MEND
+ MACRO
+&LAB _DISPOSEALL
+&LAB LDX #$1102
+ JSL $E10000
+ MEND
+ MACRO
+&LAB _GETNEWID
+&LAB LDX #$2003
+ JSL $E10000
+ MEND
+ MACRO
+&LAB _DELETEID
+&LAB LDX #$2103
+ JSL $E10000
+ MEND
+ MACRO
+&LAB _DISPOSEHANDLE
+&LAB LDX #$1002
+ JSL $E10000
+ MEND
+ MACRO
+&LAB _NEWHANDLE
+&LAB LDX #$0902
+ JSL $E10000
+ MEND

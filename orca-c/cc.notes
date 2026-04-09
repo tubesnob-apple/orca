@@ -1,0 +1,278 @@
+ORCA/C 2.3.0 development
+Copyright 1997, Byte Works Inc.
+Updated by Stephen Heumann and Kelvin Sherlock, 2017-2025
+
+These release notes document the changes between ORCA/C 2.2.1 and ORCA/C 2.3.0.  For changes between ORCA/C 2.0 and ORCA/C 2.2.1, refer to the ORCA/C 2.2.1 release notes.
+
+-- Change List --------------------------------------------------------------
+
+2.3.0       1.  Bugs squashed.  See bug notes, below.
+
+            2.  New C23 language and library features added.  See
+                "New Language Features" and "Library Updates," below.
+
+-- Compiler changes introduced in C 2.3.0 -----------------------------------
+
+New Language Features
+---------------------
+
+ORCA/C 2.3.0 has begun adding support for new language features from the recent C23 standard.  To use all available C23 features, select the new "c23" or "c23compat" language modes via the -s option within the cc= portion of the command line.  Some C23 features that are unlikely to cause compatibility problems are also available in other compatibility modes, including the default "c17compat" mode.  Features only available in C23 modes are indicated below.
+
+The following C23 language features are currently implemented:
+
+1.  (C23 modes only) ORCA/C now recognizes the new keywords added in C23.  These are:
+
+   alignas
+   alignof
+   bool
+   constexpr
+   false
+   nullptr
+   static_assert
+   thread_local
+   true
+   typeof
+   typeof_unqual
+   _BitInt
+   _Decimal128
+   _Decimal32
+   _Decimal64
+
+Of these, alignas, alignof, bool, static_assert, and thread_local are equivalent to the existing _Alignas, _Alignof, _Bool, _Static_assert, and _Thread_local keywords, respectively.  true, false, typeof, typeof_unqual, nullptr, and _BitInt are described below.  The other new C23 keywords are recognized as keywords, but the corresponding language features are not yet supported, so any attempt to use them will produce an error message.
+
+2.  (C23 modes only) Trigraphs are no longer supported, and character sequences that would have been interpreted as trigraphs can now be used normally, e.g. within string literals.
+
+3.  (C23 modes only) u8-prefixed string literals have an "array of unsigned char" type, rather than "array of char".
+
+3.  static_assert or _Static_assert can now be used in a one-argument form:
+
+   static_assert ( constant-expression ) ;
+
+4.  When a macro taking a variable number of arguments is invoked with no arguments corresponding to the variable portion of the argument list, the final comma may be omitted.  For example, a macro defined like
+
+   #define m(x, ...) /*...*/
+
+may be invoked as
+
+   m(1)
+
+5.  Universal character names (UCNs) within string literals or character constants can now designate any valid Unicode code point, including ASCII characters or control characters.
+
+6.  (C23 modes only) The validity of UCNs within identifiers is now defined based on the XID_Start and XID_Continue Unicode properties.
+
+7.  Attribute specifiers of the form [[ /*...*/ ]] may appear in certain places in declarations and statements, declaring attributes that appertain to various syntactic elements.  ORCA/C currently ignores all attributes.
+
+The __has_c_attribute preprocessor operator is also available for use within preprocessor expressions.  It is followed by parentheses enclosing an attribute name.  It expands to 0 if the attribute is not supported, or a non-zero value if it is supported.  Since ORCA/C does not currently support any attributes, it always expands to 0 in ORCA/C.
+
+8.  Labels are no longer restricted to appearing only before statements.  They can now appear before declarations (within a function body) or immediately before the closing } of a compound statement.
+
+9.  Character constants can now have the u8 prefix, indicating UTF-8 encoding.  Such character constants have the type unsigned char.  Unless designated by an octal or hexadecimal escape sequence, the character specified by a u8-prefixed character constant must be one that can be represented by a single UTF-8 code unit, i.e. a character within the 7-bit ASCII character set.
+
+10. The #elifdef and #elifndef preprocessor directives are now supported:
+
+   #elifdef identifier
+   #elifndef identifier
+
+The first is equivalent to
+
+   #elif defined identifier
+
+and the second is equivalent to
+
+   #elif !defined identifier
+
+11. (C23 modes only) The new keywords true and false denote predefined constants with type bool and values 1 and 0, respectively.  If true is used in a preprocessor expression, it is replaced with 1, unlike other identifiers or keywords (including false) that are replaced with 0.  This means that true and false can effectively be used as boolean constants within preprocessor expressions, as well as in regular C code.
+
+12. (C23 modes only) Type specifiers using typeof or typeof_unqual are now supported.  They can have the following forms:
+
+   typeof ( expression )
+   typeof ( type-name )
+   typeof_unqual ( expression )
+   typeof_unqual ( type-name )
+
+These can appear wherever type specifiers are used, e.g. in declarations.  The forms with typeof specify either the type of the expression or the type designated by the type name.  The forms with typeof_unqual are similar, except that they will remove any qualifiers (e.g. const or volatile) from the type.
+
+13. (C23 modes only) Type inference is now supported in variable definitions.  This applies to declarations that meet all of the following requirements:
+
+- They contain the storage class specifier auto
+- They do not contain any type specifiers
+- They contain exactly one declarator, declaring one variable
+- The declarator is not a pointer, array, or function declarator
+- There is an initializer for the variable
+- The initializer is an expression, not enclosed in braces
+- There was no previous declaration of the variable in the same scope
+
+In declarations meeting these requirements, the type of the variable is inferred to be the type of the initializer expression, with array or function types converted to pointer types, any qualifiers from the type of the expression removed, and any type qualifiers that appear in the declaration added.
+
+In such declarations, auto effectively acts like a type specifier indicating that the type should be inferred, rather than as a storage class specifier.  Therefore, it may be used even in places where an auto storage class specifier would otherwise not be permitted, such as in declarations at file scope or declarations that contain other storage class specifiers.
+
+For example, the declaration
+
+   static auto x = 123L;
+
+declares the variable x with type long (because that is the type of 123L) and static storage class.
+
+Note that this can change the behavior of code written using the "implicit int" feature of C89/C90, where a declaration with no type specifiers would behave as if the type specifier int was included.  In the "c23compat" language mode, declarations that use auto with no type specifiers but do not meet all the other requirements above will still be processed using the "implicit int" rule.  In "c23" mode or when #pragma lint bit 6 is set, they will produce a lint message.
+
+14. Variable length array types are now supported.  These are array types where the array length expression enclosed in brackets is not an integer constant expression but instead an expression that needs to be evaluated at execution time.  Such array types may occur only in function parameters or within a function body.
+
+The array length expression is normally evaluated when the declaration or type name that contains it appears in the code (or at the beginning of the function, in the case of expressions within function parameter declarations).  It must evaluate to a positive value, and this then determines the size of the array type for as long as it remains in scope.
+
+Functions can be defined as taking variable length array parameters (including multi-dimensional arrays) with the array sizes defined by other function parameters.  Such functions can be used to operate on arrays of various different sizes depending on the parameters passed to them at run time.  This can be useful for functions performing mathematical operations, e.g. matrix multiplies.
+
+Note that ORCA/C does not allow local variables to have variable length array types.  This is an optional feature in the C23 standard, which ORCA/C does not implement.  As an alternative, it is possible to declare a pointer to a variable length array type and then allocate space for the array with malloc() based on the desired size as determined at run time.
+
+15. The #embed preprocessor directive is now supported.  It can have one of these forms:
+
+   #embed "filename" [parameters]
+   #embed <filename> [parameters]
+
+The #embed directive embeds the bytes from the specified file into the C source file as a comma separated list of integer constants.  For example, if there is a file "testfile" that contains only the word "hello", then the directive
+
+   #embed "testfile"
+
+will expand to the token sequence 104,101,108,108,111 because those numbers correspond to the ASCII values of the characters 'h', 'e', 'l', 'l', and 'o'.
+
+The two forms of the #embed directive search for a file in the same way as the #include directive would, except that the file is not required to have the SRC file type.  Thus, the form with "filename" looks in the current directory first, while the form with <filename> looks in the ORCACDefs directory first.  As with #include, the search path can be modified with #pragma path.
+
+Either form of the #embed directive may also optionally include one or more parameter clauses of the following forms after the file name:
+
+   limit(expression)
+   if_empty(tokens)
+   prefix(tokens)
+   suffix(tokens)
+
+The limit clause takes an integer constant expression which limits the number of bytes to embed from the file.  The if_empty clause contains an alternate token sequence that will be used if no bytes can be embedded from the file, either because it was empty or because limit(0) was specified.  The prefix and suffix clauses specify extra tokens that will be included before or after those embedded from the file, provided that at least one byte is embedded from the file.  In the token sequences in the if_empty, prefix, and suffix clauses, any parentheses, brackets, or braces must be balanced and properly nested.
+
+The #embed directive is primarily useful for embedding the contents of small files into the C program.  For example, it might be used to embed a small image into the program by using the embedded token sequence from an image file to initialize an array.  Note that embedding large files may cause ORCA/C to run out of memory or encounter other limitations; other approaches such as using resources are generally better in those cases.
+
+The __has_embed preprocessor operator is also available for use within preprocessor expressions.  It is followed by parentheses enclosing a filename and optional parameters, like the arguments for the #embed directive.  It expands to a value that matches one of the following predefined macros, indicating how an #embed directive with the specified filename and parameters would behave:
+
+a) __STDC_EMBED_NOT_FOUND__ (a value of 0), indicating that the file could not be found or an unsupported parameter was used, so a corresponding #embed directive would produce an error
+b) __STDC_EMBED_FOUND__ (a value of 1), indicating that the file was found and the corresponding #embed directive would embed one or more bytes from it
+c) __STDC_EMBED_EMPTY__ (a value of 2), indicating that the file was found, but the file was empty or limit(0) was specified, so the corresponding #embed directive would not embed any bytes from it
+
+16. The __has_include preprocessor operator is available for use within preprocessor expressions.  It is followed by parentheses enclosing a filename in quotes or angle brackets, like the argument for the #include directive.  It searches for a file in the same way the #include directive would and expands to 1 if a file of the specified name is available to include, or 0 if not.  
+
+17. (C23 modes only) C23 removes support for function declarators without prototypes.  K&R-style function definitions with a parameter name list are no longer permitted.  Function declarators like f() are still permitted, but a declarator like this is now considered equivalent to f(void) -- that is, it provides a prototype for a function with no parameters.
+
+ORCA/C now supports these rules in C23-based language modes.  However, to provide better compatibility with old code, a new #pragma ignore option is provided that can partially revert to the older rules.  If a C23-based language mode is used but #pragma ignore bit 6 is set, then K&R-style function definitions with parameter name lists will be permitted, and declarations like
+
+   int f();
+
+are largely treated as if they did not provide a prototype.  A call to a function declared like this will be allowed to pass any number of arguments, and a subsequent definition of the function may include parameters.  However, a function definition (not declaration) with an empty parameter list is still treated as providing a prototype for the function with no parameters.  Also, _Generic expressions will use the C23 type compatibility rules for determining which association to use, regardless of the setting of #pragma ignore bit 6.
+
+#pragma ignore bit 6 is set by default in the "c23compat" language mode, but it is clear by default in "c23" mode.  It has no effect in pre-C23 language modes, where the rules from the earlier standards are always followed.
+
+18. Bit-precise integer types are now supported.  These are designated by type specifiers of the form _BitInt(N) or unsigned _BitInt(N), where N is an integer constant expression.  The value of N gives the width of the type (the number of value bits).  _BitInt(N) designates a signed N-bit integer type using two's-complement representation; N can range from 2 to 64.  unsigned _BitInt(N) designates an unsigned N-bit integer type; N can range from 1 to 64.  These types are distinct from the traditional C integer types (e.g. int), even though they may sometimes have the same width.
+
+In ORCA/C, bit-precise integer types are stored in memory using 16, 32, or 64 bits, whichever is needed to fit them.  If N is not exactly one of those values, then the N-bit value is sign-extended (for signed _BitInt types) or zero-extended (for unsigned _BitInt types) to the width used to store it.
+
+Note that the unary and binary conversion rules do not apply to _BitInt types in the same way that they do to other integer types.  In particular, _BitInt types narrower than int are not automatically promoted to int or unsigned int.  For example, the result of adding two _BitInt(4) values has type _BitInt(4) and is restricted to the range of _BitInt(4).  (If the resulting value would overflow that range, the behavior is undefined.)
+
+A suffix of wb or WB can be used on an integer constant to give it a _BitInt type that is just wide enough to hold the specified value.  If a wb or WB suffix is used together with u or U, then the constant has an unsigned _BitInt type just wide enough to hold the value.  For example, 6wb has the type _BitInt(4), while 6WBU has the type unsigned _BitInt(3).
+
+19. The empty initializer {} is now supported.  This functions similarly to the initializer {0}, but when initializing structures or unions it also guarantees that any padding is initialized to zero bits.
+
+20. (C23 modes only) The new keyword nullptr denotes a predefined null pointer constant.  It can be assigned or converted to any pointer type, yielding a null pointer value of that type.  The type of nullptr is nullptr_t, which is given by a typedef in <stddef.h>.  It is possible to create variables of type nullptr_t, but this is rarely useful; the only value they can hold is nullptr.
+
+21. Enumeration types have been enhanced in several ways.  First, it is now possible to explicitly specify the underlying integer type that the enumeration type will be be compatible with.  This is done by including a : and then a type name denoting an integer type in between the enum tag (if present) and the { beginning the enumerator list (if present).  When this is done, the enumeration and the enumeration constants within it will have a type compatible with that integer type, and the constants can have any values within the range of that type.  For example, this enumeration specifier declares an enumeration type compatible with long and three enumeration constants of that type:
+
+   enum X : long {A = 1000000, B, C}
+
+Second, even if the underlying type is not specified explicitly, enumeration constant values are no longer limited to the range of int.  In this case, the underlying integer type will be automatically selected to be able to hold all the values in the enumeration.  In ORCA/C, it will be the first type from the following list that can hold all the values: int, unsigned int, long, unsigned long, long long, unsigned long long.  Thus, in ORCA/C, this enumeration specifier functions similarly to the above one, also declaring an enumeration type compatible with long and three enumeration constants of that type:
+
+   enum X {A = 1000000, B, C}
+
+Furthermore, it it now permitted to redeclare an enumeration type and its enumeration constants within the same scope.  That is, two or more full enumeration specifiers for the same type may appear in the same scope.  They must agree in the names and values of the enumeration constants, and if any of them include an explicitly specified underlying type, they must all do so.
+
+
+Library Updates
+---------------
+
+ORCA/C now includes some new library functions and features specified by the C23 standards:
+
+1.  The <limits.h> and <stdint.h> headers contain new *_WIDTH macros, giving the width (number of value bits) of various integer types.
+
+2.  The function-like macro unreachable() has been added:
+
+#include <stddef.h>
+void unreachable(void);
+
+An invocation of this macro indicates that the control-flow path leading to it is unreachable.  This could be used for optimization or to help diagnose errors, but ORCA/C currently ignores it.
+
+3.  The va_start() macro is now defined like:
+
+#include <stdarg.h>
+void va_start(va_list ap, ...);
+
+Only the va_list argument is required.  The previously-required second argument giving the name of the last fixed parameter is no longer required and is ignored if present.
+
+4.  The call_once function has been added:
+
+#include <stdlib.h>
+typedef short once_flag;
+#define ONCE_FLAG_INIT 0
+void call_once(once_flag *flag, void (*func)(void));
+
+The call_once function uses a condition variable of type once_flag to ensure that a function is called exactly once.  If the condition variable pointed to by flag has been initialized with the value ONCE_FLAG_INIT and not subsequently modified, call_once will call func() and also set *flag to a different value that indicates func() has been called; otherwise, it will not call func().  Thus, if call_once is invoked one or more times with the same condition variable, it will ensure that func() is called exactly once.  Any call to call_once will only return once func() has completed, whether from that call to call_once or a previous one.
+
+5.  The memset_explicit function has been added:
+
+#include <string.h>
+void *memset_explicit(void *ptr, int val, size_t len);
+
+This does the same thing as memset, but is intended for use when clearing sensitive data.  Some compilers may optimize out certain calls to memset; using memset_explicit instead indicates that they should not do that.  ORCA/C does not perform such optimizations, so it just treats the two functions as equivalent.
+
+6.  The memccpy function has been added:
+
+#include <string.h>
+void *memccpy(void *restrict dest, const void *restrict src, int c, size_t n);
+
+This function copies bytes from src to dest until the byte value c (converted to unsigned char) is copied or until n bytes have been copied, whichever happens first.  If the byte c was copied, it returns a pointer to immediately after that byte in dest; otherwise, it returns a null pointer.  If the source and destination memory areas overlap, the results are unpredictable.
+
+7.  The free_sized and free_aligned_size functions have been added:
+
+#include <stdlib.h>
+void free_sized(void *ptr, size_t size);
+void free_aligned_sized(void *ptr, size_t alignment, size_t size);
+
+The free_sized function is like free, except that it includes a parameter giving the originally requested size of the allocation; it may be used to free memory allocated with malloc, calloc, or realloc.  The free_aligned_sized function is similar, but also includes the originally requested alignment; it may be used to free memory allocated with aligned_alloc.  The size and (if applicable) alignment must match those requested when allocating the memory; if they do not, the behavior is undefined.  In some implementations these functions may be faster than free, but in ORCA/C they are not.
+
+8.  (C23 modes only) bsearch, memchr, strchr, strrchr, strpbrk, strrpbrk, and strstr are now generic functions, meaning that their return type depends on the type of one of their parameters (the second parameter for bsearch and the first parameter for all the others).  If that parameter is a pointer to a const-qualified type, then the return type will be modified so that its pointed-to type is also const-qualified.  For example, an expression like
+
+   memchr((const char *)buf, 'x', 123)
+
+will have the type const void *, rather than void *.  This avoids the previous situation where these functions would return a pointer into the same array passed to them but would discard any const qualifier that might apply to the data in that array.  This behavior is implemented via macros; if the use of a macro is suppressed to access the actual functions, they will have the same return types as previously and will not be generic functions.
+
+-- Bugs from C 2.2.1 that have been fixed in C 2.3.0 ------------------------
+
+1. Constant expressions cast to _Bool, short, or unsigned short would not match the corresponding association in a generic selection expression.
+
+2. A spurious error could be reported if the definition of a function returning a function pointer did not include names for the parameters of the pointed-to function type, e.g.:
+
+   void (*f(void))(int, long) { /*...*/ }
+
+3. Function parameters can now be declared with function types, which get automatically adjusted to function pointers.
+
+4. If a prototype parameter list appeared as part of a type name (e.g. when type casting a function pointer), it would be ignored and treated as if no prototype was provided.
+
+5. When the unary conversion rules (integer promotions) were applied to an expression of type unsigned short, the resulting type was sometimes unsigned short rather than unsigned int.  This could affect _Generic expressions.
+
+6. In certain circumstances where the value of a 16-bit signed integer variable was converted to a wider type following an earlier access to the 16-bit variable, negative values might not be converted correctly if native code peephole optimizations and register optimizations were both enabled.
+
+7. Division or remainder operations with constant operands might be evaluated incorrectly if one operand was a negative integer and the other had an unsigned type, because the usual arithmetic conversions were not applied properly.
+
+8. Spurious errors would be reported for some operations involving expressions of function type, including comparisons like *function_pointer == function_name.
+
+9. Spurious errors would be reported if an enumeration constant defined in an inner scope had the same name as a typedef defined in an outer scope.
+
+10. The scope of an enumeration constant should only begin after the full enumerator that defines it.  Thus, within the expression giving the enumeration constant value (if present), any definition of the same enumeration constant name from an outer scope should still be visible and usable.  Therefore, code like the following should work as indicated:
+
+   enum {X = 123};
+   void f(void) {
+           enum {X = X + 12};
+           /* X has the value 135 here */
+   }
+
+11. The type of an expression using the , operator should be exactly that of its right operand, not subject to the unary conversion rules (integer promotions).

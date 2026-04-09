@@ -1,0 +1,97 @@
+ORCA/Linker 2.1.0
+Copyright 1996, Byte Works Inc.
+Updated 2023
+
+-- Change List --------------------------------------------------------------
+
+2.1.0       1.  The linker can now automatically divide a large program into
+		segments.  See "Auto-Segmentation," below.
+
+	    2.	A load segment is now flagged as position-independent only if
+		all the constituent object segments have that attribute set.
+
+	    3.	Fixed bug that caused EQU or GEQU expressions with non-constant
+		operands to be evaluated incorrectly.
+
+	    4.	The numeric value in an ORG record is now treated as a signed
+		offset from the current location, consistent with its
+		definition in the GS/OS Reference.  However, negative offset
+		values are not supported and will produce an error.
+
+2.0.6       1.	The linker could give a spurious error about the relative
+		address calculation for a BRL instruction if it branched
+		forward or backward more than 32 KB.  Since the address
+		calculation for BRL wraps around within the program bank, it
+		can branch forward or backward by up to 64 KB (to any location
+		in the program bank), and the linker now allows this.
+		
+	    2.	Fixed several problems related to alignment.  Previously,
+		the linker both reported spurious errors about alignment in
+		certain cases and failed to detect errors in other cases.
+		With these fixes, a segment alignment of $10000 is now
+		permitted.  Also, the linker can now link together multiple
+		object segments with different alignment requirements into a
+		single load segment, regardless of the order of the object
+		segments.  The alignment of the load segment will be the most
+		restrictive alignment of any of the object segments, and the
+		alignment requirements of each object segment will be obeyed.
+
+	    3.	A spurious error is no longer reported for code segments that
+		are exactly $10000 bytes long (the full size of a bank).
+
+2.0.5       1.	On case-sensitive filesystems (which are not normally used
+		natively on the Apple IIGS, but may be used through emulation
+		tools or network file servers), the linker can now find object
+		files with either upper-case or lower-case file extensions.
+
+		(Kelvin Sherlock, Stephen Heumann)
+
+	    2.	KeepType values of "DVR", "LDF", and "FST" are now accepted.
+
+2.0.4       1.	Fixed bugs that could cause spurious errors to be reported.
+
+		(Stephen Heumann)
+
+2.0.3       1.	Fixed bug that caused programs with more than one dynamic
+		segment to link improperly.
+
+		(Ian Brumby)
+
+	    2.	Fixed bug that caused approximately one in 65536 load segments
+		to be trashed with a random word placed every 14 bytes through
+		the segment.
+
+2.0.2       1.	Fixed bug that caused the linker to step on memory that did
+		not belong to it when the +m flag was used.  The most common
+		symptom of this bug was crashing during the second or
+		subsequent compile when using PRIZM.
+
+		(Kurtis Carter)
+
+2.0.1       1.	Fixed bug that caused the current location counter (* in
+                assembly language parlance) to be evaluated incorrectly in
+                some expressions.
+
+-- Documentation Update -----------------------------------------------------
+
+ORCA/M Manual, p. 492
+
+The operand in an ORG record is a signed offset from the current location, not an absolute address.  (This is consistent with the definition in the GS/OS Reference, and with the behavior of ORCA/M and other assemblers and linkers.)
+
+-- Changes introduced in ORCA/Linker 2.1.0 ----------------------------------
+
+Auto-Segmentation
+-----------------
+
+On the Apple IIGS, programs with more than 64 KB of code have to be divided into multiple load segments.  This can be done using the segment directives in the various ORCA languages, but the programmer has to manually manage them, working out how much code would fit in each segment.  Changes to a program's code or its compilation options (e.g. debugging or optimization settings) could alter the size of the generated machine code, requiring its segmentation to be changed.
+
+The ORCA linker can now automatically assign code to load segments, avoiding the need to manually change the segmentation based on the code size.  If code uses the special load segment name AUTOSEG~~~, the linker will automatically place it into load segments named AUTOSEG~00, AUTOSEG~01, etc., creating as many load segments as necessary to fit the code.
+
+To use this feature in ORCA/C, ORCA/Pascal, or ORCA/Modula-2, simply use those languages' segment directives to specify the load segment name as AUTOSEG~~~ :
+
+   segment "AUTOSEG~~~";                (in ORCA/C)
+   (*$Segment 'AUTOSEG~~~'*)            (in ORCA/Pascal or ORCA/Modula-2)
+
+You can place a directive like this at the top of each of your source files or (for ORCA/C) in a pre-include file.
+
+It is also possible to use auto-segmentation for assembly code, but the code must be written to account for the fact that any two program segments using auto-segmentation may wind up in different load segments, and therefore might be placed in different banks at run time.

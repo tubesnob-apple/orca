@@ -68,6 +68,49 @@ ret      move4 0,4                      return
 
 ****************************************************************
 *
+*  CnvSX - Copy extended floating-point value to SANE extended
+*
+*  Inputs:
+*        rec - pointer to a realrec record
+*
+*  Note: ORCA/C's 'extended' type IS 80-bit SANE extended format,
+*  so this is a straight 10-byte copy from itsReal (offset 0) to
+*  inSANE (offset 18).
+*
+****************************************************************
+*
+CnvSX    start cg
+rec      equ   4                        record pointer
+rec_sane equ   18                       offset to inSANE field
+
+         tsc                            set up DP
+         phd
+         tcd
+         ldy   #8                       copy 5 words (10 bytes)
+cp       lda   [rec],y                  load word from itsReal
+         pha
+         tya
+         clc
+         adc   #rec_sane
+         tay
+         pla
+         sta   [rec],y                  store to inSANE
+         tya
+         sec
+         sbc   #rec_sane
+         tay
+         dey
+         dey
+         bpl   cp
+         move4 0,4                      return
+         pld
+         pla
+         pla
+         rtl
+         end
+
+****************************************************************
+*
 *  procedure CnvXLL (var result: longlong; val: extended);
 *
 *  Convert floating point to long long
@@ -188,36 +231,6 @@ CnvULLX  start cg
 rval     ds    10
          end
 
-         datachk off
-****************************************************************
-*
-*  InitLabels - initialize the labels array
-*
-*  Outputs:
-*        labelTab - initialized
-*        intLabel - initialized
-*
-****************************************************************
-*
-InitLabels start cg
-maxLabel equ   3275
-
-!                                       with labelTab[0] do begin
-         lda   #-1                         val := -1;
-         sta   labelTab+6
-         sta   labelTab+8
-         stz   labelTab                    defined := false;
-         stz   labelTab+2                  chain := nil;
-         stz   labelTab+4
-!                                          end; {with}
-         ldx   #labelTab                for i := 1 to maxLabel do
-         ldy   #labelTab+10                labelTab[i] := labelTab[0];
-         lda   #maxLabel*10-1
-         mvn   labelTab,labelTab
-         stz   intLabel                 intLabel := 0;
-         rtl
-         end
-         datachk on
 
 ****************************************************************
 *

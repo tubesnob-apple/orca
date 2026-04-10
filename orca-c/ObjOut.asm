@@ -106,7 +106,8 @@ Out2     start CodeGen
          pha
          plb
          jsr   OutWord
-         add4  blkcnt,#2                blkcnt := blkcnt+2;
+         inc4  blkcnt                   blkcnt := blkcnt+2;
+         inc4  blkcnt
          rtl
          end
 
@@ -215,7 +216,8 @@ lb2      anop                           carry must be clear
          ldy   segDisp
          txa
          sta   [1],Y
-         add4  segDisp,#2               segDisp := segDisp+2;
+         inc4  segDisp                   segDisp := segDisp+2;
+         inc4  segDisp
 
          pld
          tsc

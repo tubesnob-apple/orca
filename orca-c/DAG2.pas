@@ -201,7 +201,7 @@ case code^.opcode of
    pc_bnt, pc_bnl, pc_cnv, pc_dec, pc_inc, pc_ind, pc_lbf, pc_lbu,
    pc_ngi, pc_ngl, pc_ngr, pc_not, pc_stk, pc_cop, pc_cpo, pc_tl1,
    pc_sro, pc_str, pc_fjp, pc_tjp, pc_xjp, pc_cup, pc_pop, pc_iil,
-   pc_ili, pc_idl, pc_ild:
+   pc_ili, pc_idl, pc_ild, pc_bnq, pc_ngq, pc_rbo, pc_rev, pc_ckp:
       begin
       code^.left := Pop;
       Push(code);
@@ -213,7 +213,9 @@ case code^.opcode of
    pc_les, pc_neq, pc_ior, pc_lor, pc_ixa, pc_mod, pc_uim, pc_mdl,
    pc_ulm, pc_mpi, pc_umi, pc_mpl, pc_uml, pc_mpr, pc_psh, pc_sbi,
    pc_sbl, pc_sbr, pc_shl, pc_sll, pc_shr, pc_usr, pc_slr, pc_vsr,
-   pc_tri, pc_sbf, pc_sto, pc_cui:
+   pc_tri, pc_sbf, pc_sto, pc_cui, pc_bqr, pc_bqx, pc_baq, pc_adq,
+   pc_sbq, pc_mpq, pc_umq, pc_dvq, pc_udq, pc_mdq, pc_uqm, pc_slq,
+   pc_sqr, pc_wsr:
       begin
       code^.right := Pop;
       code^.left := Pop;
@@ -223,8 +225,17 @@ case code^.opcode of
    pc_gil, pc_gli, pc_gdl, pc_gld, pc_lil, pc_lli, pc_ldl, pc_lld,
    pc_lad, pc_lao, pc_lca, pc_lda, pc_ldc, pc_ldo, pc_lod, pc_nop,
    dc_cns, dc_glb, dc_dst, pc_lnm, pc_nam, pc_nat, dc_lab, pc_add,
-   pc_ujp, dc_pin, pc_ent, pc_ret, dc_sym:
+   pc_ujp, dc_pin, pc_ent, pc_ret, dc_sym, pc_fix:
       Push(code);
+
+   pc_ckn:
+      begin
+      code^.opcode := pc_ckp;
+      temp := Pop;
+      code^.left := Pop;
+      Push(code);
+      Push(temp);
+      end;
 
    pc_cnn:
       begin

@@ -688,7 +688,7 @@ LF       equ   10                       newline
 
 disp     equ   1                        disp in s
 
-         csubroutine (4:s,2:n,4:stream),2
+         csubroutine (4:s,4:n,4:stream),2
 
          ph4   <stream                  verify that stream exists
          jsl   ~VerifyStream

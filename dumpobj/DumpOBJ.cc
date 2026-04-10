@@ -27,7 +27,7 @@
 *
 ****************************************************************/
 
-#pragma keep "DumpOBJ"
+#pragma keep "dumpobj"
 #pragma optimize 9
 
 /* GS specific declarations */
@@ -39,7 +39,7 @@ int toolerror(void);
 #define WRITE_CONSOLE(parm)     (PDosInt(0x015A,parm))
 #define GetFileInfoGS(pBlockPtr)  PDosInt(0x2006,pBlockPtr)
 
-#pragma lint -1
+#pragma lint 0
 
 /* Standard C Libraries */
 /*----------------------*/
@@ -2809,7 +2809,7 @@ return GetList(i, argc, argv);
 void Initialize (void)
 
 {
-puts("DumpOBJ 2.0.2 B1\n");	        /* write the header */
+puts("DumpOBJ 2.2.7\n");	                /* write the header */
 
 format =				/* dump in opcode format */
 namc =					/* no names in namelist */

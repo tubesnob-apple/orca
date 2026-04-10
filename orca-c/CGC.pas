@@ -31,9 +31,10 @@ uses CCommon, CGI;
 type
                                         {pcode code generation}
                                         {---------------------}
-   realrec = record                     {used to convert from real to comp}
+   realrec = record                     {used to convert from real to comp/extended}
       itsReal: extended;
       inCOMP: packed array[1..8] of byte;
+      inSANE: packed array[1..10] of byte;
       end;
 
 var
@@ -55,6 +56,15 @@ procedure CnvSC (rec: realrec); extern;
 { parameters:                                                   }
 {       rec - record containing the value to convert; also      }
 {               has space for the result                        }
+
+
+procedure CnvSX (rec: realrec); extern;
+
+{ convert a real number to SANE extended format                 }
+{                                                               }
+{ parameters:                                                   }
+{       rec - record containing the value to convert; also      }
+{               has space for the result (inSANE field)         }
 
 
 procedure CnvXLL (var result: longlong; val: extended); extern;
@@ -89,13 +99,6 @@ function CnvULLX (val: longlong): extended; extern;
 {                                                               }
 { parameters:                                                   }
 {       val - the unsigned long long value                      }
-
-
-procedure InitLabels; extern;
-
-{ initialize the labels array for a procedure                   }
-{								}
-{ Note: also defined in CGI.pas					}
 
 
 function SignBit (val: extended): integer; extern;

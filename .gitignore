@@ -1,0 +1,27 @@
+# Build artifacts
+*/obj/
+goldengate/bin_obj/
+
+# Library output files (built by makelib)
+orcalib/orcalib
+orcalib/liborca
+paslib/paslib
+syslib/syslib
+sysfloat/SysFloat
+sysfpefloat/SysFloat
+
+# Assembler/compiler temp output
+*.A
+*.ROOT
+*.root
+*.B
+*.int
+*.sym
+
+# Claude Code project files
+CLAUDE.md
+**/CLAUDE.md
+**/memory/
+
+# macOS
+.DS_Store

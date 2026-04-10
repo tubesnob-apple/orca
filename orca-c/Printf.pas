@@ -335,7 +335,7 @@ var
    begin {expect_pointer}
    ty := popType;
    if ty <> nil then begin
-      if not (ty^.kind in [pointerType,arrayType,nullptrType]) then begin
+      if not (ty^.kind in [pointerType,arrayType]) then begin
          Warning(@'expected pointer');
          end; {if}
       end {if}
@@ -395,10 +395,10 @@ var
    if ty <> nil then
       if (ty^.kind = pointerType) or (ty^.kind = arrayType) then begin
          baseTy := ty^.pType;
-         if (baseTy <> nil)
-            and (baseTy^.kind = scalarType)
-            and (baseTy^.baseType in expected)
-            then ok := true;
+         if baseTy <> nil then
+            if baseTy^.kind = scalarType then
+               if baseTy^.baseType in expected then
+                  ok := true;
          end; {if}
 
    if not ok then begin

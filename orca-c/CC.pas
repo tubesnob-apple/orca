@@ -24,6 +24,7 @@ uses CCommon, CGI, Scanner, Header, Symbol, MM, Expression, Parser, Asm;
 
 var
    i: 1..maxPath;			{loop/index variable}
+   totalErrors: integer;		{total errors including lint}
    vDCBGS: versionDCBGS;		{for checking the version number}
 
 
@@ -120,10 +121,8 @@ NextToken;                              {get the first token in the program}
 while token.kind <> eofsy do begin      {compile the program}
    if doingFunction then
       DoStatement
-   else if token.kind in topLevelDeclarationStart then begin
-      nextLocalLabel := 1;
-      DoDeclaration(false);
-      end
+   else if token.kind in topLevelDeclarationStart then
+      DoDeclaration(false)
    else begin
       Error(26);
       NextToken;
@@ -131,7 +130,12 @@ while token.kind <> eofsy do begin      {compile the program}
    end; {while}
 if doingFunction then                   {check for unclosed function}
    Error(23);
-EnableCodeGen;                          {init the code generator (if it needs it)}
+{init the code generator (if it needs it)}
+if not codegenStarted and (liDCBGS.kFlag <> 0) then begin
+   CodeGenInit (@outFileGS, liDCBGS.kFlag, doingPartial);
+   liDCBGS.kFlag := 3;
+   codegenStarted := true;
+   end; {if}
 DoGlobals;                              {create the ~GLOBALS and ~ARRAYS segments}
 
 {shut down the compiler}
@@ -149,12 +153,13 @@ if ToolError <> 0 then begin
    end; {if}
 TermScanner;                            {shut down the scanner}
 StopSpin;
-if (numErrors <> 0) or list or progress then begin
+totalErrors := numErrors + numLintErrors;
+if (totalErrors <> 0) or list or progress then begin
    writeln;				{write the number of errors}
-   if numErrors = 1 then
+   if totalErrors = 1 then
       writeln('1 error found.')
    else
-      writeln(numErrors:1, ' errors found.');
+      writeln(totalErrors:1, ' errors found.');
    end; {if}
 if list or progress then                {leave a blank line}
    writeln;

@@ -1755,17 +1755,8 @@ var
                         end; {if}
                end {else if}
             else if SignExtension(ns+1) then begin
-               if registers then begin
-                  {Leave pattern as ldx / lda / tay-for-flags / bpl ...}
-                  {Either lda or tay will be removed by CheckRegisters.}
-                  tn := npeep[ns];
-                  npeep[ns] := npeep[ns+1];
-                  npeep[ns+1] := tn;
-                  end {if}
-               else begin
-                  npeep[ns+2] := npeep[ns];
-                  Remove(ns);
-                  end; {else}
+               npeep[ns+2] := npeep[ns];
+               Remove(ns);
                end {else if}
             else if npeep[ns+1].opcode = m_xba then
                if npeep[ns+2].opcode = m_and_imm then
@@ -1806,17 +1797,8 @@ var
                      end {if}
                end {else if}
             else if SignExtension(ns+1) then begin
-               if registers then begin
-                  {Leave pattern as ldx / lda / tay-for-flags / bpl ...}
-                  {Either lda or tay will be removed by CheckRegisters.}
-                  tn := npeep[ns];
-                  npeep[ns] := npeep[ns+1];
-                  npeep[ns+1] := tn;
-                  end {if}
-               else begin
-                  npeep[ns+2] := npeep[ns];
-                  Remove(ns);
-                  end; {else}
+               npeep[ns+2] := npeep[ns];
+               Remove(ns);
                end {else if}
             else if npeep[ns+1].opcode = m_xba then begin
                if npeep[ns+2].opcode = m_and_imm then

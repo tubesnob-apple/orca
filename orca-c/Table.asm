@@ -269,7 +269,7 @@ charKinds start                         character set
          dc    i'letter'                s
          dc    i'letter'                t
          dc    i'letter'                u
-         dc    i'letter'                v
+         dc    i'ch_other'              v
          dc    i'ch_other'              w
          dc    i'ch_other'              x
          dc    i'ch_other'              y
@@ -278,7 +278,7 @@ charKinds start                         character set
          dc    i'ch_other'              |
          dc    i'ch_other'              }
          dc    i'ch_other'              ~
-         dc    i'letter'                rub
+         dc    i'ch_other'              rub
          end
 
 charSym  start                          single character symbols
@@ -286,20 +286,17 @@ charSym  start                          single character symbols
 !                                       constants
          enum  (intconst,uintconst,longconst,ulongconst,longlongconst)
          enum  (ulonglongconst,floatconst,doubleconst,extendedconst,compconst)
-         enum  (stringconst)
+         enum  (charconst,scharconst,ucharconst,ushortconst,stringconst)
 !                                       reserved words
-         enum  (_Alignassy,_Alignofsy,_Atomicsy,_BitIntsy,_Boolsy)
-         enum  (_Complexsy,_Decimal128sy,_Decimal32sy,_Decimal64sy,_Genericsy)
-         enum  (_Imaginarysy,_Noreturnsy,_Static_assertsy,_Thread_localsy,alignassy)
-         enum  (alignofsy,autosy,asmsy,boolsy,breaksy)
-         enum  (casesy,charsy,continuesy,constsy,constexprsy)
-         enum  (compsy,defaultsy,dosy,doublesy,elsesy)
-         enum  (enumsy,externsy,extendedsy,falsesy,floatsy)
-         enum  (forsy,gotosy,ifsy,intsy,inlinesy)
-         enum  (longsy,nullptrsy,pascalsy,registersy,restrictsy)
-         enum  (returnsy,shortsy,sizeofsy,staticsy,static_assertsy)
-         enum  (structsy,switchsy,segmentsy,signedsy,thread_localsy)
-         enum  (truesy,typedefsy,typeofsy,typeof_unqualsy,unionsy)
+         enum  (_Alignassy,_Alignofsy,_Atomicsy,_Boolsy,_Complexsy)
+         enum  (_Genericsy,_Imaginarysy,_Noreturnsy,_Static_assertsy,_Thread_localsy)
+         enum  (autosy,asmsy,breaksy,casesy,charsy)
+         enum  (continuesy,constsy,compsy,defaultsy,dosy)
+         enum  (doublesy,elsesy,enumsy,externsy,extendedsy)
+         enum  (floatsy,forsy,gotosy,ifsy,intsy)
+         enum  (inlinesy,longsy,pascalsy,registersy,restrictsy)
+         enum  (returnsy,shortsy,sizeofsy,staticsy,structsy)
+         enum  (switchsy,segmentsy,signedsy,typedefsy,unionsy)
          enum  (unsignedsy,voidsy,volatilesy,whilesy)
 !                                       reserved symbols
          enum  (excch,percentch,carotch,andch,asteriskch)
@@ -311,7 +308,7 @@ charSym  start                          single character symbols
          enum  (lteqop,gteqop,eqeqop,exceqop,andandop)
          enum  (barbarop,pluseqop,minuseqop,asteriskeqop,slasheqop)
          enum  (percenteqop,ltlteqop,gtgteqop,andeqop,caroteqop)
-         enum  (bareqop,poundpoundop,dotdotdotsy,coloncolonsy)
+         enum  (bareqop,poundpoundop,dotdotdotsy)
          enum  (ppnumber)               preprocessing number
          enum  (otherch)                other non-whitespace char
          enum  (eolsy,eofsy)            control characters
@@ -369,32 +366,28 @@ icp      start                          in-coming priority for expression
          dc    i1'200'                  doubleconst
          dc    i1'200'                  extendedconst
          dc    i1'200'                  compconst
+         dc    i1'200'                  charconst
+         dc    i1'200'                  scharconst
+         dc    i1'200'                  ucharconst
+         dc    i1'200'                  ushortconst
          dc    i1'200'                  stringconst
          dc    i1'200'                  _Alignassy
          dc    i1'16'                   _Alignofsy
          dc    i1'200'                  _Atomicsy
-         dc    i1'200'                  _BitInt
          dc    i1'200'                  _Boolsy
          dc    i1'200'                  _Complexsy
-         dc    i1'200'                  _Decimal128sy
-         dc    i1'200'                  _Decimal32sy
-         dc    i1'200'                  _Decimal64sy
          dc    i1'200'                  _Genericsy
          dc    i1'200'                  _Imaginarysy
          dc    i1'200'                  _Noreturnsy
          dc    i1'200'                  _Static_assertsy
          dc    i1'200'                  _Thread_localsy
-         dc    i1'200'                  alignassy
-         dc    i1'16'                   alignofsy
          dc    i1'200'                  autosy
          dc    i1'200'                  asmsy
-         dc    i1'200'                  boolsy
          dc    i1'200'                  breaksy
          dc    i1'200'                  casesy
          dc    i1'200'                  charsy
          dc    i1'200'                  continuesy
          dc    i1'200'                  constsy
-         dc    i1'200'                  constexprsy
          dc    i1'200'                  compsy
          dc    i1'200'                  defaultsy
          dc    i1'200'                  dosy
@@ -403,7 +396,6 @@ icp      start                          in-coming priority for expression
          dc    i1'200'                  enumsy
          dc    i1'200'                  externsy
          dc    i1'200'                  extendedsy
-         dc    i1'200'                  falsesy
          dc    i1'200'                  floatsy
          dc    i1'200'                  forsy
          dc    i1'200'                  gotosy
@@ -411,7 +403,6 @@ icp      start                          in-coming priority for expression
          dc    i1'200'                  intsy
          dc    i1'200'                  inlinesy
          dc    i1'200'                  longsy
-         dc    i1'200'                  nullptrsy
          dc    i1'200'                  pascalsy
          dc    i1'200'                  registersy
          dc    i1'200'                  restrictsy
@@ -419,16 +410,11 @@ icp      start                          in-coming priority for expression
          dc    i1'200'                  shortsy
          dc    i1'16'                   sizeofsy
          dc    i1'200'                  staticsy
-         dc    i1'200'                  static_assertsy
          dc    i1'200'                  structsy
          dc    i1'200'                  switchsy
          dc    i1'200'                  segmentsy
          dc    i1'200'                  signedsy
-         dc    i1'200'                  thread_localsy
-         dc    i1'200'                  truesy
          dc    i1'200'                  typedefsy
-         dc    i1'200'                  typeofsy
-         dc    i1'200'                  typeof_unqualsy
          dc    i1'200'                  unionsy
          dc    i1'200'                  unsignedsy
          dc    i1'200'                  voidsy
@@ -482,7 +468,6 @@ icp      start                          in-coming priority for expression
          dc    i1'3'                    bareqop
          dc    i1'200'                  poundpoundop
          dc    i1'200'                  dotdotdotsy
-         dc    i1'200'                  coloncolonsy
          dc    i1'200'                  ppnumber
          dc    i1'200'                  otherch
          dc    i1'200'                  eolsy
@@ -560,32 +545,28 @@ isp      start                          in stack priority for expression
          dc    i1'0'                    doubleconst
          dc    i1'0'                    extendedconst
          dc    i1'0'                    compconst
+         dc    i1'0'                    charconst
+         dc    i1'0'                    scharconst
+         dc    i1'0'                    ucharconst
+         dc    i1'0'                    ushortconst
          dc    i1'0'                    stringconst
          dc    i1'0'                    _Alignassy
          dc    i1'16'                   _Alignofsy
          dc    i1'0'                    _Atomicsy
-         dc    i1'0'                    _BitIntsy
          dc    i1'0'                    _Boolsy
          dc    i1'0'                    _Complexsy
-         dc    i1'0'                    _Decimal128sy
-         dc    i1'0'                    _Decimal32sy
-         dc    i1'0'                    _Decimal64sy
          dc    i1'0'                    _Genericsy
          dc    i1'0'                    _Imaginarysy
          dc    i1'0'                    _Noreturnsy
          dc    i1'0'                    _Static_assertsy
          dc    i1'0'                    _Thread_localsy
-         dc    i1'0'                    alignassy
-         dc    i1'16'                   alignofsy
          dc    i1'0'                    autosy
          dc    i1'0'                    asmsy
-         dc    i1'0'                    boolsy
          dc    i1'0'                    breaksy
          dc    i1'0'                    casesy
          dc    i1'0'                    charsy
          dc    i1'0'                    continuesy
          dc    i1'0'                    constsy
-         dc    i1'0'                    constexprsy
          dc    i1'0'                    compsy
          dc    i1'0'                    defaultsy
          dc    i1'0'                    dosy
@@ -594,7 +575,6 @@ isp      start                          in stack priority for expression
          dc    i1'0'                    enumsy
          dc    i1'0'                    externsy
          dc    i1'0'                    extendedsy
-         dc    i1'0'                    falsesy
          dc    i1'0'                    floatsy
          dc    i1'0'                    forsy
          dc    i1'0'                    gotosy
@@ -602,7 +582,6 @@ isp      start                          in stack priority for expression
          dc    i1'0'                    intsy
          dc    i1'0'                    inlinesy
          dc    i1'0'                    longsy
-         dc    i1'0'                    nullptrsy
          dc    i1'0'                    pascalsy
          dc    i1'0'                    registersy
          dc    i1'0'                    restrictsy
@@ -610,16 +589,11 @@ isp      start                          in stack priority for expression
          dc    i1'0'                    shortsy
          dc    i1'16'                   sizeofsy
          dc    i1'0'                    staticsy
-         dc    i1'0'                    static_assertsy
          dc    i1'0'                    structsy
          dc    i1'0'                    switchsy
          dc    i1'0'                    segmentsy
          dc    i1'0'                    signedsy
-         dc    i1'0'                    thread_localsy
-         dc    i1'0'                    truesy
          dc    i1'0'                    typedefsy
-         dc    i1'0'                    typeofsy
-         dc    i1'0'                    typeof_unqualsy
          dc    i1'0'                    unionsy
          dc    i1'0'                    unsignedsy
          dc    i1'0'                    voidsy
@@ -673,7 +647,6 @@ isp      start                          in stack priority for expression
          dc    i1'2'                    bareqop
          dc    i1'0'                    poundpoundop
          dc    i1'0'                    dotdotdotsy
-         dc    i1'0'                    coloncolonsy
          dc    i1'0'                    ppnumber
          dc    i1'0'                    otherch
          dc    i1'0'                    eolsy
@@ -885,28 +858,20 @@ reservedWords start                     reserved word names
          str14  _Alignas
          str14  _Alignof
          str14  _Atomic
-         str14  _BitInt
          str14  _Bool
          str14  _Complex
-         str14  _Decimal128
-         str14  _Decimal32
-         str14  _Decimal64
          str14  _Generic
          str14  _Imaginary
          str14  _Noreturn
          str14  _Static_assert
          str14  _Thread_local
-         str14  alignas
-         str14  alignof
          str14  auto
          str14  asm
-         str14  bool
          str14  break
          str14  case
          str14  char
          str14  continue
          str14  const
-         str14  constexpr
          str14  comp
          str14  default
          str14  do
@@ -915,7 +880,6 @@ reservedWords start                     reserved word names
          str14  enum
          str14  extern
          str14  extended
-         str14  false
          str14  float
          str14  for
          str14  goto
@@ -923,7 +887,6 @@ reservedWords start                     reserved word names
          str14  int
          str14  inline
          str14  long
-         str14  nullptr
          str14  pascal
          str14  register
          str14  restrict
@@ -931,92 +894,16 @@ reservedWords start                     reserved word names
          str14  short
          str14  sizeof
          str14  static
-         str14  static_assert
          str14  struct
          str14  switch
          str14  segment
          str14  signed
-         str14  thread_local
-         str14  true
          str14  typedef
-         str14  typeof
-         str14  typeof_unqual
          str14  union
          str14  unsigned
          str14  void
          str14  volatile
          str14  while
-         end
-
-keywordCategories start                 keyword categories
-c17keyword equ 1
-c23keyword equ 2
-orcacKeyword equ 128
-
-         dc     i1'c17keyword+c23keyword'               _Alignas
-         dc     i1'c17keyword+c23keyword'               _Alignof
-         dc     i1'c17keyword+c23keyword'               _Atomic
-         dc     i1'c23keyword+orcacKeyword'             _BitInt
-         dc     i1'c17keyword+c23keyword'               _Bool
-         dc     i1'c17keyword+c23keyword'               _Complex
-         dc     i1'c23keyword'                          _Decimal128
-         dc     i1'c23keyword'                          _Decimal32
-         dc     i1'c23keyword'                          _Decimal64
-         dc     i1'c17keyword+c23keyword'               _Generic
-         dc     i1'c17keyword+c23keyword'               _Imaginary
-         dc     i1'c17keyword+c23keyword'               _Noreturn
-         dc     i1'c17keyword+c23keyword'               _Static_assert
-         dc     i1'c17keyword+c23keyword'               _Thread_local
-         dc     i1'c23keyword'                          alignas
-         dc     i1'c23keyword'                          alignof
-         dc     i1'c17keyword+c23keyword'               auto
-         dc     i1'orcacKeyword'                        asm
-         dc     i1'c23keyword'                          bool
-         dc     i1'c17keyword+c23keyword'               break
-         dc     i1'c17keyword+c23keyword'               case
-         dc     i1'c17keyword+c23keyword'               char
-         dc     i1'c17keyword+c23keyword'               continue
-         dc     i1'c17keyword+c23keyword'               const
-         dc     i1'c23keyword'                          constexpr
-         dc     i1'orcacKeyword'                        comp
-         dc     i1'c17keyword+c23keyword'               default
-         dc     i1'c17keyword+c23keyword'               do
-         dc     i1'c17keyword+c23keyword'               double
-         dc     i1'c17keyword+c23keyword'               else
-         dc     i1'c17keyword+c23keyword'               enum
-         dc     i1'c17keyword+c23keyword'               extern
-         dc     i1'orcacKeyword'                        extended
-         dc     i1'c23keyword'                          false
-         dc     i1'c17keyword+c23keyword'               float
-         dc     i1'c17keyword+c23keyword'               for
-         dc     i1'c17keyword+c23keyword'               goto
-         dc     i1'c17keyword+c23keyword'               if
-         dc     i1'c17keyword+c23keyword'               int
-         dc     i1'c17keyword+c23keyword+orcacKeyword'  inline
-         dc     i1'c17keyword+c23keyword'               long
-         dc     i1'c23keyword'                          nullptr
-         dc     i1'orcacKeyword'                        pascal
-         dc     i1'c17keyword+c23keyword'               register
-         dc     i1'c17keyword+c23keyword'               restrict
-         dc     i1'c17keyword+c23keyword'               return
-         dc     i1'c17keyword+c23keyword'               short
-         dc     i1'c17keyword+c23keyword'               sizeof
-         dc     i1'c17keyword+c23keyword'               static
-         dc     i1'c23keyword'                          static_assert
-         dc     i1'c17keyword+c23keyword'               struct
-         dc     i1'c17keyword+c23keyword'               switch
-         dc     i1'orcacKeyword'                        segment
-         dc     i1'c17keyword+c23keyword'               signed
-         dc     i1'c23keyword'                          thread_local
-         dc     i1'c23keyword'                          true
-         dc     i1'c17keyword+c23keyword'               typedef
-         dc     i1'c23keyword'                          typeof
-         dc     i1'c23keyword'                          typeof_unqual
-         dc     i1'c17keyword+c23keyword'               union
-         dc     i1'c17keyword+c23keyword'               unsigned
-         dc     i1'c17keyword+c23keyword'               void
-         dc     i1'c17keyword+c23keyword'               volatile
-         dc     i1'c17keyword+c23keyword'               while
          end
 
 ropcodes start
@@ -1040,27 +927,24 @@ wordHash start                          reserved word hash table
 !                                       constants
          enum  (intconst,uintconst,longconst,ulongconst,longlongconst)
          enum  (ulonglongconst,floatconst,doubleconst,extendedconst,compconst)
-         enum  (stringconst)
+         enum  (charconst,scharconst,ucharconst,ushortconst,stringconst)
 !                                       reserved words
-         enum  (_Alignassy,_Alignofsy,_Atomicsy,_BitIntsy,_Boolsy)
-         enum  (_Complexsy,_Decimal128sy,_Decimal32sy,_Decimal64sy,_Genericsy)
-         enum  (_Imaginarysy,_Noreturnsy,_Static_assertsy,_Thread_localsy,alignassy)
-         enum  (alignofsy,autosy,asmsy,boolsy,breaksy)
-         enum  (casesy,charsy,continuesy,constsy,constexprsy)
-         enum  (compsy,defaultsy,dosy,doublesy,elsesy)
-         enum  (enumsy,externsy,extendedsy,falsesy,floatsy)
-         enum  (forsy,gotosy,ifsy,intsy,inlinesy)
-         enum  (longsy,nullptrsy,pascalsy,registersy,restrictsy)
-         enum  (returnsy,shortsy,sizeofsy,staticsy,static_assertsy)
-         enum  (structsy,switchsy,segmentsy,signedsy,thread_localsy)
-         enum  (truesy,typedefsy,typeofsy,typeof_unqualsy,unionsy)
+         enum  (_Alignassy,_Alignofsy,_Atomicsy,_Boolsy,_Complexsy)
+         enum  (_Genericsy,_Imaginarysy,_Noreturnsy,_Static_assertsy,_Thread_localsy)
+         enum  (autosy,asmsy,breaksy,casesy,charsy)
+         enum  (continuesy,constsy,compsy,defaultsy,dosy)
+         enum  (doublesy,elsesy,enumsy,externsy,extendedsy)
+         enum  (floatsy,forsy,gotosy,ifsy,intsy)
+         enum  (inlinesy,longsy,pascalsy,registersy,restrictsy)
+         enum  (returnsy,shortsy,sizeofsy,staticsy,structsy)
+         enum  (switchsy,segmentsy,signedsy,typedefsy,unionsy)
          enum  (unsignedsy,voidsy,volatilesy,whilesy,succwhilesy)
 
-         dc    i'_Alignassy,alignassy'
-         dc    i'alignassy,boolsy,casesy,defaultsy,elsesy,falsesy'
+         dc    i'_Alignassy,autosy'
+         dc    i'autosy,breaksy,casesy,defaultsy,elsesy,floatsy'
          dc    i'gotosy,ifsy,ifsy,longsy,longsy,longsy'
-         dc    i'nullptrsy,nullptrsy,pascalsy,pascalsy,registersy,registersy'
-         dc    i'shortsy,thread_localsy,unionsy,voidsy,whilesy,succwhilesy'
+         dc    i'pascalsy,pascalsy,pascalsy,pascalsy,registersy,registersy'
+         dc    i'shortsy,typedefsy,unionsy,voidsy,whilesy,succwhilesy'
          end
 
 stdcVersion start                       __STDC_VERSION__ values
@@ -1069,7 +953,6 @@ stdcVersion start                       __STDC_VERSION__ values
          dc    i4'199901'               c99
          dc    i4'201112'               c11
          dc    i4'201710'               c17
-         dc    i4'202311'               c23
          end
 
 macRomanToUCS start
@@ -1090,5 +973,3 @@ macRomanToUCS start
          dc    i2'$F8FF, $00D2, $00DA, $00DB, $00D9, $0131, $02C6, $02DC'
          dc    i2'$00AF, $02D8, $02D9, $02DA, $00B8, $02DD, $02DB, $02C7'
          end
-
-         copy  chartables.asm

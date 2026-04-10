@@ -47,8 +47,6 @@
 {  charPtrPtr - pointer to type record for char *               }
 {  vaInfoPtr - pointer to type record for internal va info type }
 {  stringTypePtr - pointer to the base type for string literals }
-{  utf8StringTypePtr - pointer to the base type for UTF-8       }
-{       string literals (used in C23 or later)                  }
 {  utf16StringTypePtr - pointer to the base type for UTF-16     }
 {       string literals                                         }
 {  utf32StringTypePtr - pointer to the base type for UTF-32     }
@@ -72,16 +70,6 @@ uses CCommon, CGI, MM, Scanner;
 
 const
    staticNumLen = 5;                    {length of staticNum name prefix}
-   enumTypeUsed = 57;                   {error for unexpected use of enum type}
-                                        {Note: Types with kind = enumType are      }
-                                        {currently only used for enum type tags.   }
-                                        {Error(enumTypeUsed) acts as an assertion  }
-                                        {that enumType is not used in other places,}
-                                        {such as for expression or variable types. }
-                                        {There is commented-out code for handling  }
-                                        {enumType in some other places, but it has }
-                                        {not been used for a long time (if ever)   }
-                                        {and has not been updated for C23.         }
 
 type
    symbolTablePtr = ^symbolTable;
@@ -90,7 +78,6 @@ type
       buckets: array[0..hashSize2] of identPtr; {hash buckets}
       next: symbolTablePtr;             {next symbol table}
       isEmpty: boolean;                 {is the pool empty (nothing in buckets)?}
-      lastVMSym: identPtr;              {list symbol of variably modified type}
       case noStatics: boolean of        {no statics/staticNum for this table?}
          false: (staticNum: packed array[1..6] of char); {staticNum for this table}
          true: ();
@@ -105,7 +92,12 @@ var
    lastParameterLLN: integer;           {label number of last parameter (0 if none)}
    lastParameterSize: integer;          {size of last parameter}
 
-   treatNoParmsFnAsPrototyped: boolean; {force () functions to be treated as prototyped?}
+                                        {base types}
+   charPtr,sCharPtr,uCharPtr,shortPtr,uShortPtr,intPtr,uIntPtr,int32Ptr,
+      uInt32Ptr,longPtr,uLongPtr,longLongPtr,uLongLongPtr,boolPtr,
+      floatPtr,doublePtr,compPtr,extendedPtr,stringTypePtr,utf16StringTypePtr,
+      utf32StringTypePtr,voidPtr,voidPtrPtr,charPtrPtr,vaInfoPtr,constCharPtr,
+      defaultStruct: typePtr;
 
 {---------------------------------------------------------------}
 
@@ -176,52 +168,9 @@ procedure GenSymbols (sym: symbolTablePtr; doGlobals: boolean);
 {       symLength - length of debug symbol table                }
 
 
-function GetBitIntType (isUnsigned: boolean; width: integer): typePtr;
-
-{ Get a _BitInt type of specified signedness and with           }
-{                                                               }
-{ Parameters:                                                   }
-{    isUnsigned - is the type unsigned?                         }
-{    width - width of type                                      }
-{                                                               }
-{ Returns: Pointer to the specified _BitInt type                }
-
-
 procedure InitSymbol;
 
 { Initialize the symbol table module                            }
-
-
-function InRangeOfType (val: i65; tp: typePtr): boolean;
-
-{ Check if a value is in the range of an integer type           }
-{                                                               }
-{ Parameters:                                                   }
-{    val - the value                                            }
-{    tp - integer type to check                                 }
-{                                                               }
-{ Returns: True if val is in range of tp, else false            }
-
-
-function IsComplete (tp: typePtr): boolean;
-
-{ Check if tp is a complete type                                }
-{                                                               }
-{ Parameters:                                                   }
-{    tp - type to check                                         }
-{                                                               }
-{ Returns: True if tp is a complete object type, else false     }
-
-
-function IsSignedType (tp: typePtr): boolean;
-
-{ Check if tp is a signed type                                  }
-{                                                               }
-{ Parameters:                                                   }
-{    tp - type to check                                         }
-{                                                               }
-{ Returns: True if tp is an arithmetic type that can hold       }
-{       negative values, else false                             }
 
 
 function IsVoid (tp: typePtr): boolean;
@@ -232,36 +181,6 @@ function IsVoid (tp: typePtr): boolean;
 {    tp - type to check                                         }
 {                                                               }
 { Returns: True if the type is void, else false                 }
-
-
-function IsVariablyModifiedType (tp: typePtr): boolean;
-
-{ Check to see if a type is a variable modified type            }
-{                                                               }
-{ Parameters:                                                   }
-{    tp - type to check                                         }
-{                                                               }
-{ Returns: True if the type is a VM type, else false            }
-
-
-function IsVLAType (tp: typePtr): boolean;
-
-{ Check to see if a type is a VLA type                          }
-{                                                               }
-{ Parameters:                                                   }
-{    tp - type to check                                         }
-{                                                               }
-{ Returns: True if the type is a VLA type, else false           }
-
-
-function CopyType (tp: typePtr): typePtr;
-
-{ Make a new copy of a type, so it can be modified.             }
-{                                                               }
-{ Parameters:                                                   }
-{    tp - type to copy                                          }
-{                                                               }
-{ Returns: The new copy of the type                             }
 
 
 function LabelToDisp (lab: integer): integer; extern;
@@ -325,25 +244,6 @@ function Unqualify (tp: typePtr): typePtr;
 { returns: pointer to the unqualified type                      }
 
 
-function Width (tp: typePtr): integer;
-
-{ Get the width of a type                                       }
-{                                                               }
-{ parameters:                                                   }
-{       tp - the type                                           }
-{                                                               }
-{ returns: the width (number of integer value bits) of tp       }
-
-
-function VariablyModifiedSymInList(vmSym: identPtr; list: identPtr): boolean;
-
-{ Check if a symbol is in a list of variably modified symbols.  }
-{                                                               }
-{ parameters:                                                   }
-{       vmSym - the symbol to check for (or nil for none)       }
-{       list - the list of variably modified symbols            }
-
-
 function NewSymbol (name: stringPtr; itype: typePtr; class: tokenEnum;
                    space: spaceType; state: stateKind; isInline: boolean):
                    identPtr;
@@ -401,12 +301,6 @@ function StringType(prefix: charStrPrefixEnum): typePtr;
 {                                                               }
 { parameters:                                                   }
 {       prefix - the prefix                                     }
-
-{-- External 65-bit math routines ------------------------------}
-
-function Ge65(a,b: i65): boolean; extern;
-
-function Le65(a,b: i65): boolean; extern;
 
 {---------------------------------------------------------------}
 
@@ -519,15 +413,6 @@ procedure SaveBF (addr: ptr; bitdisp, bitsize: integer; val: longint); extern;
 {       bitdisp - displacement past the address                 }
 {       bitsize - number of bits                                }
 {       val - value to copy                                     }
-
-{-- External 64-bit math routines ------------------------------}
-{ Procedures for arithmetic and shifts compute "x := x OP y".   }
-
-procedure sub64 (var x: longlong; y: longlong); extern;
-
-procedure shl64 (var x: longlong; y: integer); extern;
-
-procedure lshr64 (var x: longlong; y: integer); extern;
 
 {---------------------------------------------------------------}
 
@@ -645,16 +530,11 @@ else
             CompTypes := t1^.baseType = t2^.baseType;
             if t1^.cType <> t2^.cType then
                if (not looseTypeChecks) 
-                  or (t1^.cType in [ctBool,ctBitInt,ctUBitInt])
-                  or (t2^.cType in [ctBool,ctBitInt,ctUBitInt]) then
-                  CompTypes := false;
-            if t1^.cType in [ctBitInt,ctUBitInt] then
-               if t1^.bitIntWidth <> t2^.bitIntWidth then
+                  or (t1^.cType = ctBool) or (t2^.cType = ctBool) then
                   CompTypes := false;
             end {if}
          else if kind2 = enumType then
-            Error(enumTypeUsed);
-            {CompTypes := (t1^.baseType = cgWord) and (t1^.cType = ctInt);}
+            CompTypes := (t1^.baseType = cgWord) and (t1^.cType = ctInt);
 
       arrayType:
          if kind2 = arrayType then begin
@@ -679,9 +559,6 @@ else
             if t2^.ptype^.kind = functionType then
                CompTypes := CompTypes(t1, t2^.ptype);
 
-      nullptrType:
-         CompTypes := kind2 = nullptrType;
-
       pointerType: begin
          if IsVoid(t1^.ptype) or IsVoid(t2^.ptype) then begin
             CompTypes := true;
@@ -694,11 +571,10 @@ else
          end;
 
       enumType:
-         Error(enumTypeUsed);
-         {if kind2 = scalarType then
+         if kind2 = scalarType then
             CompTypes := (t2^.baseType = cgWord) and (t2^.cType = ctInt)
          else if kind2 = enumType then
-            CompTypes := true;}
+            CompTypes := true;
 
       structType,unionType:
          CompTypes := t1 = t2;
@@ -724,15 +600,6 @@ var
    tp1,tp2: typeRecord;                 {temporary types used in comparison}
 
 
-   function TreatAsPrototyped(tp: typePtr): boolean;
-   
-   { Should a function type be treated as prototyped?           }
-   
-   begin {TreatAsPrototyped}
-   TreatAsPrototyped := tp^.prototyped
-      or (treatNoParmsFnAsPrototyped and (tp^.parameterList = nil));
-   end; {TreatAsPrototyped}
-
 begin {StrictCompTypes}
 if t1 = t2 then begin                   {shortcut}
    StrictCompTypes := true;
@@ -754,13 +621,9 @@ case kind1 of
       if kind2 = scalarType then begin
          StrictCompTypes :=
             (t1^.baseType = t2^.baseType) and (t1^.cType = t2^.cType);
-         if t1^.cType in [ctBitInt,ctUBitInt] then
-            if t1^.bitIntWidth <> t2^.bitIntWidth then
-               StrictCompTypes := false;
          end {if}
       else if kind2 = enumType then
-         Error(enumTypeUsed);
-         {StrictCompTypes := (t1^.baseType = cgWord) and (t1^.cType = ctInt);}
+         StrictCompTypes := (t1^.baseType = cgWord) and (t1^.cType = ctInt);
 
    arrayType:
       if kind2 = arrayType then begin
@@ -780,15 +643,15 @@ case kind1 of
             goto 1;
          if t1^.varargs <> t2^.varargs then
             goto 1;
-         if TreatAsPrototyped(t1) and TreatAsPrototyped(t2) then begin
+         if t1^.prototyped and t2^.prototyped then begin
             p1 := t1^.parameterList;
             p2 := t2^.parameterList;
             while (p1 <> nil) and (p2 <> nil) do begin
+               tp1 := p1^.parameterType^;
+               tp2 := p2^.parameterType^;
                if p1^.parameterType = p2^.parameterType then
                   {these parameters are compatible}
                else begin
-                  tp1 := p1^.parameterType^;
-                  tp2 := p2^.parameterType^;
                   tp1.qualifiers := [];
                   tp2.qualifiers := [];
                   if tp1.kind = arrayType then
@@ -812,13 +675,13 @@ case kind1 of
                   if not StrictCompTypes(@tp1, @tp2) then
                      goto 1;
                   end; {else}
-               p1 := p1^.next;
-               p2 := p2^.next;
+                  p1 := p1^.next;
+                  p2 := p2^.next;
                end; {while}
             if p1 <> p2 then
                goto 1;
             end {if}
-         else if TreatAsPrototyped(t1) then begin
+         else if t1^.prototyped then begin
             p1 := t1^.parameterList;
             while p1 <> nil do begin
                if p1^.parameterType^.kind = scalarType then
@@ -828,7 +691,7 @@ case kind1 of
                p1 := p1^.next;
                end; {while}
             end {else if}
-         else if TreatAsPrototyped(t2) then begin
+         else if t2^.prototyped then begin
             p2 := t2^.parameterList;
             while p2 <> nil do begin
                if p2^.parameterType^.kind = scalarType then
@@ -845,15 +708,11 @@ case kind1 of
       if kind2 = pointertype then
          StrictCompTypes := StrictCompTypes(t1^.ptype, t2^.ptype);
 
-   nullptrType:
-         StrictCompTypes := kind2 = nullptrType;
-
    enumType:
-      Error(enumTypeUsed);
-      {if kind2 = scalarType then
+      if kind2 = scalarType then
          StrictCompTypes := (t2^.baseType = cgWord) and (t2^.cType = ctInt)
       else if kind2 = enumType then
-         StrictCompTypes := true;}
+         StrictCompTypes := true;
 
    structType,unionType:
       StrictCompTypes := t1 = t2;
@@ -1191,7 +1050,7 @@ procedure DoGlobals;
       sp := table^.buckets[i];
       while sp <> nil do begin
          if sp^.storage in [global,private] then
-            if sp^.itype^.kind in [scalarType,pointerType,nullptrType] then begin
+            if sp^.itype^.kind in [scalarType,pointerType] then begin
                if sp^.state = initialized then begin
                   Gen2Name(dc_glb, 0, ord(sp^.storage = private), sp^.name);
                   ip := sp^.iPtr;
@@ -1392,12 +1251,12 @@ if pp <> nil then begin			{prototyped parameters}
    tk.numString := nil;
    tk.class := identifier;
    while pp <> nil do begin
+      pln := GetLocalLabel;
       tk.name := pp^.parameter^.name;
       tk.symbolPtr := nil;
       sp := FindSymbol(tk, variableSpace, true, false);
       if sp = nil then
          sp := pp^.parameter;
-      pln := sp^.pln;
       if sp^.itype^.kind = arrayType then begin
          size := cgPointerSize;
          Gen3(dc_prm, pln, cgPointerSize, sp^.pdisp);
@@ -1414,6 +1273,7 @@ if pp <> nil then begin			{prototyped parameters}
                end; {if}
 	 Gen3(dc_prm, pln, size, sp^.pdisp);
 	 end; {else}
+      sp^.pln := pln;
       if first then begin
          first := false;
          lastParameterLLN := pln;
@@ -1427,7 +1287,8 @@ else begin				{K&R parameters}
       sp := table^.buckets[i];
       while sp <> nil do begin
 	 if sp^.storage = parameter then begin
-            pln := sp^.pln;
+            pln := GetLocalLabel;
+            sp^.pln := pln;
             if sp^.itype^.kind = arrayType then begin
                size := cgPointerSize;
                Gen3(dc_prm, sp^.lln, cgPointerSize, sp^.pdisp);
@@ -1653,7 +1514,7 @@ var
          tp := tp^.dType;
       case tp^.kind of
          scalarType:	WriteScalarType(tp, $80, subscripts);
-         enumType:      Error(enumTypeUsed);
+         enumType,
          functionType:  WriteScalarType(intPtr, $80, subscripts);
          otherwise:	begin
         		CnOut(11);
@@ -1661,18 +1522,6 @@ var
                         end;
          end; {case}
       end; {WritePointerType}
-
-
-      procedure WriteNullptrType (subscripts: integer);
-
-      { write a type field for nullptr_t			}
-      {								}
-      { parameters:						}
-      {    subscripts - number of subscript fields		}
-      
-      begin {WriteNullptrType}
-      WritePointerType(voidPtrPtr, subscripts);
-      end; {WriteNullptrType}
 
 
       procedure ExpandPointerType (tp: typePtr); forward;
@@ -1731,11 +1580,9 @@ var
          else
             WriteScalarType(tp2, 0, count)
       else if tp2^.kind = enumType then
-         Error(enumTypeUsed) {WriteScalarType(intPtr, 0, count)}
+         WriteScalarType(intPtr, 0, count)
       else if tp2^.kind = pointerType then
          WritePointerType(tp2, count)
-      else if tp2^.kind = nullptrType then
-         WriteNullptrType(count)
       else begin
          CnOut(12);
          CnOut2(count);
@@ -1774,8 +1621,8 @@ var
       tp := tp^.ptype;
       while tp^.kind = definedType do
          tp := tp^.dType;
-      if tp^.kind in [pointerType,nullptrType,arrayType,structType,unionType]
-         then begin
+      if tp^.kind in [pointerType,arrayType,structType,unionType] then
+         begin
          symLength := symLength+12;
          CnOut2(0); CnOut2(0);
          CnOut2(0); CnOut2(0);
@@ -1785,7 +1632,6 @@ var
          		   	WritePointerType(tp, 0);
                            	ExpandPointerType(tp);
                            	end;
-            nullptrType:        WriteNullptrType(0);
             arrayType:		WriteArrays(tp);
             structType,
             unionType:		begin
@@ -1810,19 +1656,18 @@ var
    while tPtr^.kind = definedType do
       tPtr := tPtr^.dType;
    if tPtr^.kind in
-      [scalarType,arrayType,pointerType,nullptrType,enumType,structType,unionType]
+      [scalarType,arrayType,pointerType,enumType,structType,unionType]
       then begin
       symLength := symLength+12;        {update length of symbol table}
       WriteName(ip);			{write the name field}
       WriteAddress(ip);			{write the address field}
       case tPtr^.kind of
          scalarType:	WriteScalarType(tPtr, 0, 0);
-         enumType:	Error(enumTypeUsed); {WriteScalarType(intPtr, 0, 0);}
+         enumType:	WriteScalarType(intPtr, 0, 0);
          pointerType:	begin
          		WritePointerType(tPtr, 0);
                         ExpandPointerType(tPtr);
                         end;
-         nullptrType:   WriteNullptrType(0);
          arrayType:	WriteArrays(tPtr);
          structType,
          unionType:	begin
@@ -1863,54 +1708,6 @@ if doGlobals then			{do globals}
 end; {GenSymbols}
 
 
-function GetBitIntType {isUnsigned: boolean; width: integer): typePtr};
-
-{ Get a _BitInt type of specified signedness and with           }
-{                                                               }
-{ Parameters:                                                   }
-{    isUnsigned - is the type unsigned?                         }
-{    width - width of type                                      }
-{                                                               }
-{ Returns: Pointer to the specified _BitInt type                }
-
-var
-   tp: typePtr;
-
-begin
-tp := pointer(Calloc(sizeof(typeRecord)));
-{tp^.qualifiers := [];}
-{tp^.saveDisp := 0;}
-tp^.kind := scalarType;
-if width <= cgWordSize * 8 then begin
-   if isUnsigned then
-      tp^.baseType := cgUWord
-   else
-      tp^.baseType := cgWord;
-   tp^.size := cgWordSize;
-   end {if}
-else if width <= cgLongSize * 8 then begin
-   if isUnsigned then
-      tp^.baseType := cgULong
-   else
-      tp^.baseType := cgLong;
-   tp^.size := cgLongSize;
-   end {else if}
-else begin
-   if isUnsigned then
-      tp^.baseType := cgUQuad
-   else
-      tp^.baseType := cgQuad;
-   tp^.size := cgQuadSize;
-   end; {else}
-if isUnsigned then
-   tp^.cType := ctUBitInt
-else
-   tp^.cType := ctBitInt;
-tp^.bitIntWidth := width;
-GetBitIntType := tp;
-end;
-
-
 procedure InitSymbol;
 
 { Initialize the symbol table module                            }
@@ -1928,7 +1725,6 @@ PushTable;
 globalTable := table;
 globalTable^.isEmpty := false;          {global table is never treated as empty}
 functionTable := nil;
-treatNoParmsFnAsPrototyped := false;
                                         {declare base types}
 new(sCharPtr);                          {signed char}
 with sCharPtr^ do begin
@@ -2100,23 +1896,6 @@ with stringTypePtr^ do begin
    kind := arrayType;
    aType := charPtr;
    elements := 0;
-   isVariableLength := false;
-   sizeLLN := 0;
-   sizeTree := nil;
-   aQualifiers := [];
-   end; {with}
-new(utf8StringTypePtr);                 {UTF-8 string constant type (C23+)}
-with utf8StringTypePtr^ do begin
-   size := 0;
-   saveDisp := 0;
-   qualifiers := [];
-   kind := arrayType;
-   aType := uCharPtr;
-   elements := 0;
-   isVariableLength := false;
-   sizeLLN := 0;
-   sizeTree := nil;
-   aQualifiers := [];
    end; {with}
 new(utf16StringTypePtr);                {UTF-16 string constant type}
 with utf16StringTypePtr^ do begin
@@ -2126,10 +1905,6 @@ with utf16StringTypePtr^ do begin
    kind := arrayType;
    aType := uShortPtr;
    elements := 0;
-   isVariableLength := false;
-   sizeLLN := 0;
-   sizeTree := nil;
-   aQualifiers := [];
    end; {with}
 new(utf32StringTypePtr);                {UTF-32 string constant type}
 with utf32StringTypePtr^ do begin
@@ -2139,10 +1914,6 @@ with utf32StringTypePtr^ do begin
    kind := arrayType;
    aType := uLongPtr;
    elements := 0;
-   isVariableLength := false;
-   sizeLLN := 0;
-   sizeTree := nil;
-   aQualifiers := [];
    end; {with}
 new(voidPtr);                           {void}
 with voidPtr^ do begin
@@ -2160,7 +1931,6 @@ with voidPtrPtr^ do begin
    qualifiers := [];
    kind := pointerType;
    pType := voidPtr;
-   wasStarVLA := false;
    end; {with}
 new(charPtrPtr);                        {char *}
 with charPtrPtr^ do begin
@@ -2169,14 +1939,6 @@ with charPtrPtr^ do begin
    qualifiers := [];
    kind := pointerType;
    pType := charPtr;
-   wasStarVLA := false;
-   end; {with}
-new(nullptr_tPtr);                      {nullptr_t (type of nullptr)}
-with nullptr_tPtr^ do begin
-   size := cgPointerSize;
-   saveDisp := 0;
-   qualifiers := [];
-   kind := nullptrType;
    end; {with}
 new(vaInfoPtr);                         {internal varargs info type (char*[2])}
 with vaInfoPtr^ do begin
@@ -2186,10 +1948,6 @@ with vaInfoPtr^ do begin
    kind := arrayType;
    aType := charPtrPtr;
    elements := 2;
-   isVariableLength := false;
-   sizeLLN := 0;
-   sizeTree := nil;
-   aQualifiers := [];
    end; {with}
 new(defaultStruct);                     {default structure}
 with defaultStruct^ do begin            {(for structures with errors)}
@@ -2217,78 +1975,6 @@ constCharPtr^.qualifiers := [tqConst];
 end; {InitSymbol}
 
 
-function InRangeOfType {val: i65; tp: typePtr): boolean};
-
-{ Check if a value is in the range of an integer type           }
-{                                                               }
-{ Parameters:                                                   }
-{    val - the value                                            }
-{    tp - integer type to check                                 }
-{                                                               }
-{ Returns: True if val is in range of tp, else false            }
-
-var
-   minVal,maxVal: i65;                  {min/max values in type}
-
-begin {InRangeOfType}
-maxVal.ll := longlong1;                 {compute min/max values for type}
-shl64(maxVal.ll, Width(tp));
-sub64(maxVal.ll, longlong1);
-maxVal.sign := 0;
-if IsSignedType(tp) then begin
-   lshr64(maxVal.ll, 1);
-   minVal.ll := longlong0;
-   sub64(minVal.ll, maxVal.ll);
-   sub64(minVal.ll, longlong1);
-   minVal.sign := -1;
-   end {if}
-else begin
-   minVal.ll := longlong0;
-   minVal.sign := 0;
-   end; {else}
-InRangeOfType := Ge65(val, minVal) and Le65(val, maxVal);
-end; {InRangeOfType}
-
-
-function IsComplete {tp: typePtr): boolean};
-
-{ Check if tp is a complete type                                }
-{                                                               }
-{ Parameters:                                                   }
-{    tp - type to check                                         }
-{                                                               }
-{ Returns: True if tp is a complete object type, else false     }
-
-begin {IsComplete}
-IsComplete := tp^.size <> 0;
-end; {IsComplete}
-
-
-function IsSignedType {tp: typePtr): boolean};
-
-{ Check if tp is a signed type                                  }
-{                                                               }
-{ Parameters:                                                   }
-{    tp - type to check                                         }
-{                                                               }
-{ Returns: True if tp is an arithmetic type that can hold       }
-{       negative values, else false                             }
-
-begin {IsSignedType}
-case tp^.kind of
-   scalarType:
-      IsSignedType := tp^.ctype in [ctSChar,ctShort,ctInt,ctLong,ctLongLong,
-         ctFloat,ctDouble,ctLongDouble,ctComp,ctInt32,ctBitInt];
-
-   enumType:
-      IsSignedType := IsSignedType(tp^.underlyingType);
-
-   otherwise:
-      IsSignedType := false;
-   end; {case}
-end; {IsSignedType}
-
-
 function IsVoid {tp: typePtr): boolean};
 
 { Check to see if a type is void                                }
@@ -2308,46 +1994,7 @@ else if tp^.kind = scalarType then
 end; {IsVoid}
 
 
-function IsVariablyModifiedType {tp: typePtr): boolean};
-
-{ Check to see if a type is a variable modified type            }
-{                                                               }
-{ Parameters:                                                   }
-{    tp - type to check                                         }
-{                                                               }
-{ Returns: True if the type is a VM type, else false            }
-
-label 1;
-
-begin {IsVariablyModifiedType}
-IsVariablyModifiedType := false;
-while tp^.kind in [arrayType,pointerType,functionType,definedType] do begin
-   if tp^.kind = arrayType then
-      if tp^.isVariableLength then begin
-         IsVariablyModifiedType := true;
-         goto 1;
-         end; {if}
-   tp := tp^.aType;
-   end; {while}
-1:
-end; {IsVariablyModifiedType}
-
-
-function IsVLAType {tp: typePtr): boolean};
-
-{ Check to see if a type is a VLA type                          }
-{                                                               }
-{ Parameters:                                                   }
-{    tp - type to check                                         }
-{                                                               }
-{ Returns: True if the type is a VLA type, else false           }
-
-begin {IsVLAType}
-IsVLAType := (tp^.kind = arrayType) and tp^.isVariableLength;
-end; {IsVLAType}
-
-
-function CopyType {tp: typePtr): typePtr};
+function CopyType (tp: typePtr): typePtr;
 
 { Make a new copy of a type, so it can be modified.             }
 {                                                               }
@@ -2417,27 +2064,15 @@ if t1 <> t2 then
                compType^.aType := tType;
                end; {if}
          end; {if}
-      if t2^.kind = arrayType then begin {compose array types}
-         tType := compType^.aType;
-         if (t2^.size <> 0) and not t2^.isVariableLength then
-            compType := t2
-         else if (t1^.size <> 0) and not t1^.isVariableLength then
-            compType := t1
-         else if t2^.isVariableLength and (t2^.sizeLLN <> 0) then
-            compType := t2
-         else if t1^.isVariableLength and (t1^.sizeLLN <> 0) then
-            compType := t1
-         else if t2^.isVariableLength then
-            compType := t2
-         else if t1^.isVariableLength then
-            compType := t1
-         else
-            compType := t2;
-         if compType^.aType <> tType then begin
-            compType := CopyType(compType);
-            compType^.aType := tType;
-            end; {if}
-         end; {if}
+      if t2^.kind = arrayType then      {get array size from t1 if needed}
+         if t2^.size = 0 then
+            if t1^.size <> 0 then
+               if t1^.aType^.size = t2^.aType^.size then begin
+                  if compType = t2 then
+                     compType := CopyType(t2);
+                  CompType^.size := t1^.size;
+                  CompType^.elements := t1^.elements;
+                  end; {if}
       if t2^.kind = functionType then   {compose function parameter types}
          if t1^.prototyped and t2^.prototyped then begin
             if compType = t2 then
@@ -2531,7 +2166,6 @@ tp^.size := cgPointerSize;
 tp^.saveDisp := 0;
 tp^.qualifiers := [];
 tp^.kind := pointerType;
-tp^.wasStarVLA := false;
 tp^.pType := pType;
 MakePointerTo := tp;
 end; {MakePointerTo}
@@ -2617,72 +2251,6 @@ if tp^.qualifiers <> [] then
 end; {Unqualify}
 
 
-function Width {tp: typePtr): integer};
-
-{ Get the width of a type                                       }
-{                                                               }
-{ parameters:                                                   }
-{       tp - the type                                           }
-{                                                               }
-{ returns: the width (number of integer value bits) of tp       }
-
-begin {Width}
-case tp^.kind of
-   scalarType:
-      if tp^.ctype = ctBool then
-         Width := 1
-      else if tp^.ctype in [ctBitInt,ctUBitInt] then
-         Width := tp^.bitIntWidth
-      else
-         case tp^.basetype of
-            cgByte,cgUByte:                     Width := cgByteSize * 8;
-            cgWord,cgUWord:                     Width := cgWordSize * 8;
-            cgLong,cgULong:                     Width := cgLongSize * 8;
-            cgQuad,cgUQuad:                     Width := cgQuadSize * 8;
-            cgReal,cgDouble,cgComp,cgExtended:  Width := maxint;
-            cgString,ccPointer:                 Width := cgPointerSize * 8;
-            cgVoid:                             Width := 0;
-            end; {case}
-
-   enumType:
-      Width := Width(tp^.underlyingType);
-
-   pointerType,arrayType:
-      Width := cgPointerSize * 8;
-
-   otherwise:
-      Width := 0;
-   end; {case}
-end; {Width}
-
-
-function VariablyModifiedSymInList{vmSym: identPtr; list: identPtr): boolean};
-
-{ Check if a symbol is in a list of variably modified symbols.  }
-{                                                               }
-{ parameters:                                                   }
-{       vmSym - the symbol to check for (or nil for none)       }
-{       list - the list of variably modified symbols            }
-
-label 1;
-
-begin {VariablyModifiedSymInList}
-if vmSym = nil then
-   VariablyModifiedSymInList := true
-else begin
-   while list <> nil do begin
-      if list = vmSym then begin
-         VariablyModifiedSymInList := true;
-         goto 1;
-         end; {if}
-      list := list^.nextVMSym;
-      end; {while}
-   VariablyModifiedSymInList := false;
-   end; {else}
-1:
-end; {VariablyModifiedSymInList}
-
-
 function NewSymbol {name: stringPtr; itype: typePtr; class: tokenEnum;
                    space: spaceType; state: stateKind; isInline: boolean):
                    identPtr};
@@ -2709,6 +2277,7 @@ var
    needSymbol: boolean;                 {do we need to declare it?}
    np: stringPtr;                       {for forming static name}
    p: identPtr;                         {work pointer}
+   redeclOK: boolean;                   {is redeclaration of existing sym OK?}
    tk: tokenType;                       {fake token; for FindSymbol}
 
 
@@ -2786,21 +2355,20 @@ if space <> fieldListSpace then begin   {are we defining a function?}
       end; {else if}
    cs := FindSymbol(tk, space, true, true); {check for duplicates}
    if cs <> nil then begin
-      if ((itype = nil)
-         or (cs^.itype = nil)
-         or (not CompTypes(cs^.itype, itype))
-         or ((cs^.state = initialized) and (state = initialized))
-         or ((class = typedefsy) <> (cs^.class = typedefsy))
-         or ((globalTable <> table) 
-            and (not (class in [externsy,typedefsy])
-               or not (cs^.class in [externsy,typedefsy])))
-         or ((class = typedefsy)
-            and (IsVariablyModifiedType(itype)
-               or IsVariablyModifiedType(cs^.itype))))
-         and ((not doingParameters) or (cs^.state <> declared))
-         then
-         Error(42)
-      else begin
+      redeclOK := true;
+      if (not doingParameters) or (cs^.state <> declared) then begin
+         if (itype = nil) or (cs^.itype = nil) then
+            redeclOK := false
+         else if (not CompTypes(cs^.itype, itype))
+            or ((cs^.state = initialized) and (state = initialized))
+            or ((class = typedefsy) <> (cs^.class = typedefsy))
+            or ((globalTable <> table)
+               and (not (class in [externsy,typedefsy])
+                  or not (cs^.class in [externsy,typedefsy])))
+            then
+            redeclOK := false;
+         end; {if}
+      if redeclOK then begin
          itype := MakeCompositeType(cs^.itype, itype);
          if class = externsy then
             if cs^.class = staticsy then
@@ -2815,7 +2383,9 @@ if space <> fieldListSpace then begin   {are we defining a function?}
                         UnInline;
          p := cs;
          needSymbol := false;
-         end; {else}
+         end {if}
+      else
+         Error(42);
       end {if}
    else if class = externsy then        {check for outer decl of same object/fn}
       if table <> globalTable then begin
@@ -2855,8 +2425,6 @@ if needSymbol then begin
    p^.name := name;                     {record the name}
    {p^.next := nil;}
    {p^.used := false;}                  {unused for now}
-   {p^.underspecified := false;}        {not underspecified}
-   {p^.nextVMSym := nil;}
    if space <> fieldListSpace then      {insert the symbol in the hash bucket}
       begin
       if (itype = nil) or not isGlobal then begin
@@ -2867,12 +2435,6 @@ if needSymbol then begin
          hashPtr := pointer(ord4(globalTable)+Hash(name));
       if space = tagSpace then
          hashPtr := pointer(ord4(hashPtr) + 4*(hashSize+1));
-      if space = variableSpace then
-         if itype <> nil then
-            if IsVariablyModifiedType(itype) then begin
-               p^.nextVMSym := table^.lastVMSym;
-               table^.lastVMSym := p;
-               end; {if}
       p^.next := hashPtr^;
       hashPtr^ := p;
       end; {if}
@@ -2967,10 +2529,6 @@ else begin
    ClearTable(tPtr^);
    tPtr^.isEmpty := true;
    end; {else}
-if table <> nil then
-   tPtr^.lastVMSym := table^.lastVMSym
-else
-   tPtr^.lastVMSym := nil;
 tPtr^.next := table;
 table := tPtr;
 tPtr^.noStatics := true;
@@ -3039,14 +2597,8 @@ function StringType{prefix: charStrPrefixEnum): typePtr};
 {       prefix - the prefix                                     }
 
 begin {StringType}
-if prefix = prefix_none then
+if prefix in [prefix_none,prefix_u8] then
    StringType := stringTypePtr
-else if prefix = prefix_u8 then begin
-   if cStd < c23 then
-      StringType := stringTypePtr
-   else
-      StringType := utf8StringTypePtr;
-   end {else if}
 else if prefix in [prefix_u16,prefix_L] then
    StringType := utf16StringTypePtr
 else

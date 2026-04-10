@@ -35,7 +35,7 @@ uses CCommon, CGI, CGC, ObjOut;
 type
    labelptr = ^labelentry;              {pointer to a forward ref node}
    labelentry = record                  {forward ref node}
-      addr: integer;
+      addr: longint;
       next: labelptr;
       end;
 
@@ -47,6 +47,9 @@ type
          false: (ival,hval: integer);
       end;
 
+   labelrecPtr = ^labelrec;              {pointer to a label record}
+   labeltabHalfType = array[0..4095] of labelrec; {half label table (4096 entries)}
+
 var
                                         {current instruction info}
                                         {------------------------}
@@ -55,7 +58,10 @@ var
                                         {65816 native code generation}
                                         {----------------------------}
    didOne: boolean;                     {has an optimization been done?}
-   labeltab: array[0..maxlabel] of labelrec; {label table}
+   labeltab1: ^labeltabHalfType;        {label table entries 0..4095 (heap allocated)}
+   labeltab2: ^labeltabHalfType;        {label table entries 4096..8191 (heap allocated)}
+   labeltab3: ^labeltabHalfType;        {label table entries 8192..12287 (heap allocated)}
+   labeltab4: ^labeltabHalfType;        {label table entries 12288..maxlabel (heap allocated)}
    localLabel: array[0..maxLocalLabel] of integer; {local variable label table}
 
 {---------------------------------------------------------------}
@@ -86,6 +92,14 @@ procedure GenImplied (p_opcode: integer);
 {       p_code - operation code                                 }
 
 
+procedure GenImpliedForFlags (p_opcode: integer);
+
+{ Generate implied addressing instruction used for flags only.  }
+{                                                               }
+{ parameters:                                                   }
+{       p_code - operation code (m_tax or m_tay)                }
+
+
 procedure GenCall (callNum: integer);
 
 { short form of jsl to library subroutine - reduces code size   }
@@ -97,6 +111,14 @@ procedure GenCall (callNum: integer);
 procedure GenLab (lnum: integer);
 
 { generate a label                                              }
+{                                                               }
+{ parameters:                                                   }
+{       lnum - label number                                     }
+
+
+procedure GenLabUsedOnce (lnum: integer);
+
+{ generate a label that is only targeted by one branch          }
 {                                                               }
 { parameters:                                                   }
 {       lnum - label number                                     }
@@ -137,6 +159,13 @@ procedure LabelSearch (lab: integer; len, shift, disp: integer);
 {       string space                                            }
 { Note 2: negative length indicates relative branch             }
 { Note 3: zero length indicates 2 byte addr -1                  }
+
+
+procedure InitLabels;
+
+{ initialize the label table for a new function                }
+{                                                               }
+{ Note: also declared as extern in CGI.pas                      }
 
 
 procedure RefName (lab: stringPtr; disp, len, shift: integer);
@@ -193,6 +222,26 @@ procedure GenSymbols (sym: ptr; doGlobals: integer); extern;
 
 {--------------------------------------------------------------------------}
 
+function LT (lab: integer): labelrecPtr;
+
+{ return pointer to label table entry                          }
+{                                                               }
+{ The label table is split into two heap-allocated halves to   }
+{ avoid placing a >64K static array in the 65816 code bank.    }
+
+begin {LT}
+if (lab < 0) or (lab > maxlabel) then lab := 0;  {guard against out-of-range values}
+if lab < 4096 then
+   LT := pointer(ord4(labeltab1) + longint(lab) * 10)
+else if lab < 8192 then
+   LT := pointer(ord4(labeltab2) + longint(lab - 4096) * 10)
+else if lab < 12288 then
+   LT := pointer(ord4(labeltab3) + longint(lab - 8192) * 10)
+else
+   LT := pointer(ord4(labeltab4) + longint(lab - 12288) * 10);
+end; {LT}
+
+
 procedure LabelSearch {lab: integer; len, shift, disp: integer};
 
 { resolve a label reference                                     }
@@ -210,15 +259,17 @@ procedure LabelSearch {lab: integer; len, shift, disp: integer};
 
 var
    next: labelptr;                      {work pointer}
+   ltp: labelrecPtr;                    {cached pointer to label record}
 
 begin {LabelSearch}
-if labeltab[lab].defined and (len < 0) and (shift = 0) and (disp = 0) then begin
+ltp := LT(lab);
+if ltp^.defined and (len < 0) and (shift = 0) and (disp = 0) then begin
 
    {handle a relative branch to a known disp}
    if len = -1 then
-      CnOut(labeltab[lab].ival - long(pc).lsw - cbufflen + len)
+      CnOut(ltp^.ival - long(pc).lsw - cbufflen + len)
    else
-      CnOut2(labeltab[lab].ival - long(pc).lsw - cbufflen + len);
+      CnOut2(ltp^.ival - long(pc).lsw - cbufflen + len);
    end {if}
 else begin
    if lab <> maxlabel then begin
@@ -243,17 +294,17 @@ else begin
          end; {else}
       end; {if}
    Out(135);                            {generate a relative offset from the seg. start}
-   if not labeltab[lab].defined then begin
+   if not ltp^.defined then begin
       next := pointer(Malloc(sizeof(labelEntry))); {value unknown: create a reference}
-      next^.next := labeltab[lab].chain;
-      labeltab[lab].chain := next;
+      next^.next := ltp^.chain;
+      ltp^.chain := next;
       next^.addr := blkcnt;
       Out2(0);
       Out2(0);
       end {if}
-   else {labeltab[lab].defined} begin
-      Out2(labeltab[lab].ival);         {value known: write it}
-      Out2(labeltab[lab].hval);
+   else {ltp^.defined} begin
+      Out2(ltp^.ival);                  {value known: write it}
+      Out2(ltp^.hval);
       end; {else}
    if len = 0 then begin
       Out(129);                         {subtract 1 from addr}
@@ -272,7 +323,7 @@ else begin
       end; {if}
    if shift <> 0 then begin
       Out(129);                         {shift the address}
-      Out2(-shift); Out2(-1);
+      Out2(-shift); if (shift > 0) then Out2(-1) else Out2(0);
       Out(7);
       end; {if}
    if lab <> maxlabel then              {if not a string, end the expression}
@@ -292,14 +343,16 @@ procedure UpDate (lab: integer; labelValue: longint);
 
 var
    next,temp: labelptr;                 {work pointers}
+   ltp: labelrecPtr;                    {cached pointer to label record}
 
 begin {UpDate}
-if labeltab[lab].defined then
+ltp := LT(lab);
+if ltp^.defined then
    Error(cge1)
 else begin
 
    {define the label for future references}
-   with labeltab[lab] do begin
+   with ltp^ do begin
       defined := true;
       val := labelValue;
       next := chain;
@@ -322,6 +375,37 @@ else begin
 end; {UpDate}
 
 
+procedure InitLabels;
+
+{ initialize the label table for a new function                }
+{                                                               }
+{ The table is split into two heap-allocated halves to avoid   }
+{ placing a >64K array in the 65816 code bank.  Each half is   }
+{ allocated on the first call and reused on subsequent calls.  }
+
+var
+   i: integer;
+   ltp: labelrecPtr;                    {cached pointer to label record}
+
+begin {InitLabels}
+if labeltab1 = nil then
+   new(labeltab1);
+if labeltab2 = nil then
+   new(labeltab2);
+if labeltab3 = nil then
+   new(labeltab3);
+if labeltab4 = nil then
+   new(labeltab4);
+for i := 0 to maxlabel do begin
+   ltp := LT(i);
+   ltp^.defined := false;
+   ltp^.chain := nil;
+   ltp^.val := -1;
+   end; {for}
+intLabel := 0;
+end; {InitLabels}
+
+
 procedure WriteNative (opcode: integer; mode: addressingMode; operand: integer;
                       name: stringPtr; flags: integer);
 
@@ -337,20 +421,23 @@ procedure WriteNative (opcode: integer; mode: addressingMode; operand: integer;
 label 1;
 
 type
-   rkind = (k1,k2,k3);                  {cnv record types}
+   rkind = (k1,k2,k3,k4,k5);            {cnv record types}
 
 var
+   bp: ^byte;                           {byte pointer}
    ch: char;                            {temp storage for string constants}
    cns: realRec;                        {for converting reals to bytes}
    cnv: record                          {for converting double, real to bytes}
       case rkind of
          k1: (rval: real;);
          k2: (dval: double;);
-         k3: (ival1,ival2,ival3,ival4: integer;);
+         k3: (qval: longlong);
+         k4: (eval: extended);
+         k5: (ival1,ival2,ival3,ival4,ival5: integer;);
       end;
    count: integer;                      {number of constants to repeat}
    i,j,k: integer;                      {loop variables}
-   lsegDisp: integer;                   {for backtracking while writting the   }
+   lsegDisp: longint;                   {for backtracking while writting the   }
                                         { debugger's symbol table              }
    lval: longint;                       {temp storage for long constant}
    nptr: stringPtr;                     {pointer to a name}
@@ -414,6 +501,26 @@ var
    end; {GenImmediate2}
 
 
+   function ShiftSize (flags: integer): integer;
+
+   { Determine the shift size specified by flags.               }
+   { (Positive means right shift, negative means left shift.)   }
+   {                                                            }
+   { parameters:                                                }
+   {    flags - the flags                                       }
+
+   begin {ShiftSize}
+   if (flags & shift8) <> 0 then
+      ShiftSize := 8
+   else if (flags & shift16) <> 0 then
+      ShiftSize := 16
+   else if (flags & shiftLeft8) <> 0 then
+      ShiftSize := -8
+   else
+      ShiftSize := 0;
+   end; {ShiftSize}
+
+
    procedure DefGlobal (private: integer);
 
    { define a global label                                      }
@@ -452,6 +559,7 @@ case mode of
             if not longA then
                if operand = 255 then
                   goto 1;
+         opcode := opcode & ~asmFlag;
          CnOut(opcode);
          if opcode = m_pea then
             GenImmediate2
@@ -597,6 +705,13 @@ case mode of
                                   CnOut2(long(lval).lsw);
                                   CnOut2(long(lval).msw);
                                   end;
+            cgQuad,cgUQuad      : begin
+                                  cnv.qval := icptr(name)^.qval;
+                                  CnOut2(cnv.ival1);
+                                  CnOut2(cnv.ival2);
+                                  CnOut2(cnv.ival3);
+                                  CnOut2(cnv.ival4);
+                                  end;
             cgReal              : begin
                                   cnv.rval := icptr(name)^.rval;
                                   CnOut2(cnv.ival1);
@@ -616,15 +731,28 @@ case mode of
                                      CnOut(cns.inCOMP[j]);
                                   end;
             cgExtended          : begin
-                                  cns.itsReal := icptr(name)^.rval;
-                                  CnvSX(cns);
-                                  for j := 1 to 10 do
-                                     CnOut(cns.inSANE[j]);
+                                  cnv.eval := icptr(name)^.rval;
+                                  CnOut2(cnv.ival1);
+                                  CnOut2(cnv.ival2);
+                                  CnOut2(cnv.ival3);
+                                  CnOut2(cnv.ival4);
+                                  CnOut2(cnv.ival5);
                                   end;
             cgString            : begin
-                                  sptr := icptr(name)^.str;
-                                  for j := 1 to sptr^.length do
-                                     CnOut(ord(sPtr^.str[j]));
+                                  if not icptr(name)^.isByteSeq then begin
+                                     sptr := icptr(name)^.str;
+                                     for j := 1 to sptr^.length do
+                                        CnOut(ord(sPtr^.str[j]));
+                                     end {if}
+                                  else begin
+                                     lval := 0;
+                                     while lval < icptr(name)^.len do begin
+                                        bp := pointer(
+                                           ord4(icptr(name)^.data) + lval);
+                                        CnOut(bp^);
+                                        lval := lval + 1;
+                                        end;
+                                     end; {else}
                                   end;
             ccPointer           : begin
                                   if icptr(name)^.lab <> nil then begin
@@ -659,9 +787,9 @@ case mode of
                                      j := sptr^.length;
                                      if maxString-stringSize >= j+1 then begin
                                         for k := 1 to j do
-                                           stringSpace[k+stringSize] :=
+                                           stringSpace^[k+stringSize] :=
                                               sptr^.str[k];
-                                        stringSpace[stringSize+j+1] := chr(0);
+                                        stringSpace^[stringSize+j+1] := chr(0);
                                         stringSize := stringSize+j+1;
                                         end {if}
                                      else
@@ -703,8 +831,10 @@ case mode of
             LabelSearch(operand, 2, 16, 0)
          else
             LabelSearch(operand, 1, 16, 0)
+      else if (flags & subtract1) <> 0 then
+         LabelSearch(operand, 0, ShiftSize(flags), 0)
       else
-         LabelSearch(operand, 0, 0, 0);
+         LabelSearch(operand, 2, 0, 0);
       end;
 
    special:
@@ -750,7 +880,7 @@ Purge;                                  {dump constant buffer}
 if stringsize <> 0 then begin           {define string space}
    UpDate(maxLabel, pc);                {define the local label for the string space}
    for i := 1 to stringsize do
-      CnOut(ord(stringspace[i]));
+      CnOut(ord(stringspace^[i]));
    Purge;
    end; {if}
 Out(0);                                 {end the segment}
@@ -793,6 +923,18 @@ procedure GenImplied {p_opcode: integer};
 begin {GenImplied}
 GenNative(p_opcode, implied, 0, nil, 0);
 end; {GenImplied}
+
+
+procedure GenImpliedForFlags {p_opcode: integer};
+
+{ Generate implied addressing instruction used for flags only.  }
+{                                                               }
+{ parameters:                                                   }
+{       p_code - operation code (m_tax or m_tay)                }
+
+begin {GenImpliedForFlags}
+GenNative(p_opcode, implied, 0, nil, forFlags);
+end; {GenImpliedForFlags}
 
 
 procedure GenCall {callNum: integer};
@@ -884,6 +1026,27 @@ case callNum of
    75: sp := @'~COPYBF';
    76: sp := @'~STACKERR';              {CC}
    77: sp := @'~LOADSTRUCT';            {CC}
+   78: sp := @'~DIV4';                  {CC}
+   79: sp := @'~MUL8';
+   80: sp := @'~UMUL8';
+   81: sp := @'~CDIV8';
+   82: sp := @'~UDIV8';
+   83: sp := @'~CNVLONGLONGREAL';
+   84: sp := @'~CNVULONGLONGREAL';
+   85: sp := @'~SHL8';
+   86: sp := @'~ASHR8';
+   87: sp := @'~LSHR8';
+   88: sp := @'~SCMP8';
+   89: sp := @'~CNVREALLONGLONG';
+   90: sp := @'~CNVREALULONGLONG';
+   91: sp := @'~SINGLEPRECISION';
+   92: sp := @'~DOUBLEPRECISION';
+   93: sp := @'~COMPPRECISION';
+   94: sp := @'~CUMUL2';
+   95: sp := @'~REALFIX';
+   96: sp := @'~DOUBLEFIX';
+   97: sp := @'~COMPFIX';
+   98: sp := @'~CHECKPTRC';
    otherwise:
       Error(cge1);
    end; {case}
@@ -901,6 +1064,18 @@ procedure GenLab {lnum: integer};
 begin {GenLab}
 GenNative(d_lab, gnrlabel, lnum, nil, 0);
 end; {GenLab}
+
+
+procedure GenLabUsedOnce {lnum: integer};
+
+{ generate a label that is only targeted by one branch          }
+{                                                               }
+{ parameters:                                                   }
+{       lnum - label number                                     }
+
+begin {GenLabUsedOnce}
+GenNative(d_lab, gnrlabel, lnum, nil, labelUsedOnce);
+end; {GenLabUsedOnce}
 
 
 procedure InitFile {keepName: gsosOutStringPtr; keepFlag: integer; partial: boolean};
@@ -956,7 +1131,13 @@ procedure InitFile {keepName: gsosOutStringPtr; keepFlag: integer; partial: bool
    OpenObj(fname2);
 
    {write the header}
-   Header(@'~_ROOT', $4000, 0);
+   {GNO programs use JSL/RTL (memorymodel 1); ~_ROOT may land anywhere in the
+    24-bit address space, so disable the 64KB bank-size check (lengthCode=1
+    → BANKSIZE=0).  Standard programs keep the 64KB limit (lengthCode=0).}
+   if gnoStartup then
+      Header(@'~_ROOT', $4000, 1)
+   else
+      Header(@'~_ROOT', $4000, 0);
 
    {new desk accessory initialization}
    if isNewDeskAcc then begin
@@ -1112,6 +1293,27 @@ procedure InitFile {keepName: gsosOutStringPtr; keepFlag: integer; partial: bool
       end
 
    {normal program initialization}
+   else if gnoStartup then begin
+
+      {GNO startup: toolboxes already running under the GNO kernel.
+       Skip ~_BWSTARTUP3 (ByteWorks tool startup) entirely.
+       Set data bank, then call ~C_STARTUP (GNO-aware), main, ~C_SHUTDOWN.}
+      SetDataBank;
+      CnOut(m_jsl);
+      if rtl then
+         RefName(@'~C_STARTUP2', 0, 3, 0)
+      else
+         RefName(@'~C_STARTUP', 0, 3, 0);
+      CnOut(m_jsl);
+      RefName(@'main', 0, 3, 0);
+      CnOut(m_jsl);
+      if rtl then
+         RefName(@'~C_SHUTDOWN2', 0, 3, 0)
+      else
+         RefName(@'~C_SHUTDOWN', 0, 3, 0);
+      end
+
+   {standard ByteWorks startup (standalone GS/OS application)}
    else begin
 
       {write the initial JSL}

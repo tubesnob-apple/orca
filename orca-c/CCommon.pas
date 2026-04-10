@@ -112,14 +112,13 @@ const
    flag_t       = $00001000;            {treat all errors as terminal?}
    flag_w       = $00000200;            {wait when an error is found?}
 
-   versionStr = '2.3.0 dev';		{compiler version}
+   versionStr = '2.2.7-20260409.190023';		{compiler version}
 
 type
                                         {Misc.}
                                         {-----}
    long = record lsw,msw: integer; end; {for extracting words from longints}
    longlong = record lo,hi: longint; end; {64-bit integer representation}
-   i65 = record ll: longlong; sign: -1..0; end; {65-bit integer (two's-complement)}
  
    cString = packed array [1..256] of char; {null terminated string}
    cStringPtr = ^cString;
@@ -147,7 +146,6 @@ type
    gsosOutStringPtr = ^gsosOutString;
    
    { C language standards }
-   { Note: this enumeration also appears in Scanner.asm. }
    cStandardEnum = (c89,c95,c99,c11,c17,c23);
    
    { The base types include two main categories.  The values starting    }
@@ -167,8 +165,7 @@ type
 
    cTypeEnum = (ctChar, ctSChar, ctUChar, ctShort, ctUShort, ctInt, ctUInt,
                 ctLong, ctULong, ctFloat, ctDouble, ctLongDouble, ctComp,
-                ctVoid, ctInt32, ctUInt32, ctBool, ctLongLong, ctULongLong,
-                ctBitInt, ctUBitInt);
+                ctVoid, ctInt32, ctUInt32, ctBool, ctLongLong, ctULongLong);
 
                                         {tokens}
                                         {------}
@@ -177,25 +174,22 @@ type
    tokenEnum = (                        {enumeration of the tokens}
                ident,                   {identifiers}
                                         {constants}
-                                        {Note: compconst tokens are       }
-                                        { not found in program code.      }
-                                        { They are created only by casts. }
+                                        {Note: compconst and charconst, etc. }
+                                        { are not found in program code.     }
+                                        { They are created only by casts.    }
                intconst,uintconst,longconst,ulongconst,longlongconst,
                ulonglongconst,floatconst,doubleconst,extendedconst,compconst,
-               stringconst,
+               charconst,scharconst,ucharconst,ushortconst,stringconst,
                                         {reserved words}
-               _Alignassy,_Alignofsy,_Atomicsy,_BitIntsy,_Boolsy,
-               _Complexsy,_Decimal128sy,_Decimal32sy,_Decimal64sy,_Genericsy,
-               _Imaginarysy,_Noreturnsy,_Static_assertsy,_Thread_localsy,alignassy,
-               alignofsy,autosy,asmsy,boolsy,breaksy,
-               casesy,charsy,continuesy,constsy,constexprsy,
-               compsy,defaultsy,dosy,doublesy,elsesy,
-               enumsy,externsy,extendedsy,falsesy,floatsy,
-               forsy,gotosy,ifsy,intsy,inlinesy,
-               longsy,nullptrsy,pascalsy,registersy,restrictsy,
-               returnsy,shortsy,sizeofsy,staticsy,static_assertsy,
-               structsy,switchsy,segmentsy,signedsy,thread_localsy,
-               truesy,typedefsy,typeofsy,typeof_unqualsy,unionsy,
+               _Alignassy,_Alignofsy,_Atomicsy,_Boolsy,_Complexsy,
+               _Genericsy,_Imaginarysy,_Noreturnsy,_Static_assertsy,_Thread_localsy,
+               autosy,asmsy,breaksy,casesy,charsy,
+               continuesy,constsy,compsy,defaultsy,dosy,
+               doublesy,elsesy,enumsy,externsy,extendedsy,
+               floatsy,forsy,gotosy,ifsy,intsy,
+               inlinesy,longsy,pascalsy,registersy,restrictsy,
+               returnsy,shortsy,sizeofsy,staticsy,structsy,
+               switchsy,segmentsy,signedsy,typedefsy,unionsy,
                unsignedsy,voidsy,volatilesy,whilesy,
                                         {reserved symbols}
                excch,percentch,carotch,andch,asteriskch,
@@ -207,7 +201,7 @@ type
                lteqop,gteqop,eqeqop,exceqop,andandop,
                barbarop,pluseqop,minuseqop,asteriskeqop,slasheqop,
                percenteqop,ltlteqop,gtgteqop,andeqop,caroteqop,
-               bareqop,poundpoundop,dotdotdotsy,coloncolonsy,
+               bareqop,poundpoundop,dotdotdotsy,
                ppnumber,                {preprocessing number (pp-token)}
                otherch,                 {other non-whitespace char (pp-token)}
                eolsy,eofsy,             {control characters}
@@ -234,23 +228,17 @@ type
                  longlongConstant,realConstant,stringConstant,otherCharacter,
                  preprocessingNumber,macroParameter);
    identPtr = ^identRecord;             {^ to a symbol table entry}
-   typePtr = ^typeRecord;
    tokenType = record                   {a token}
       kind: tokenEnum;                  {kind of token}
       numString: stringPtr;             {chars in number (macros only)}
       case class: tokenClass of         {token info}
-                                        {Note: itype/ltype/qtype and low bits}
-                                        { of ival/lval/qval must overlap     }
          reservedWord  : ();
          reservedSymbol: (isDigraph: boolean);
          identifier    : (name: stringPtr;
                           symbolPtr: identPtr);
-         intConstant   : (itype: typePtr;
-                          ival: integer);
-         longConstant  : (ltype: typePtr;
-                          lval: longint);
-         longlongConstant: (qtype: typePtr;
-                          qval: longlong);
+         intConstant   : (ival: integer);
+         longConstant  : (lval: longint);
+         longlongConstant: (qval: longlong);
          realConstant  : (rval: extended);
          stringConstant: (sval: longstringPtr;
                           ispstring: boolean;
@@ -264,11 +252,12 @@ type
                                         {-----------}
   expressionKind = (                    {kinds of expressions}
      preprocessorExpression,            {used by preprocessor commands}
-     integerConstantExpression,         {array subscripts, case labels,
+     arrayExpression,                   {array subscripts, case labels,
                                          bit-field lengths, enum values}
      initializerExpression,             {static variable initializers}
      autoInitializerExpression,         {auto variable initializers}
      normalExpression);                 {for run-time evaluation}
+  typePtr = ^typeRecord;
   tokenPtr = ^tokenRecord;
   tokenRecord = record                  {for operation, operand stacks}
      next: tokenPtr;                    {next token on the stack}
@@ -276,20 +265,18 @@ type
      token: tokenType;                  {token at this node/leaf}
      case boolean of
         true : (id: identPtr;);         {^symbol table entry for this operand}
-        false: (castType: typePtr;      {cast type (for casts or VLA sizeof)}
-                vlaCode: ptr;);         {code for VLA type in cast/sizeof/etc.}
+        false: (castType: typePtr;);    {cast type (for type casts only)}
      end;
 
                                         {goto label list}
                                         {---------------}
    gotoPtr = ^gotoRecord;
    gotoRecord = record
+      {Note: if the size changes, see gotoSize}
       next: gotoPtr;
       name: stringPtr;
       lab: integer;
       defined: boolean;
-      lastVMSym: identPtr;              {last variably modified sym before label}
-                                        {(if defined) or first goto (if not)    }
       end;
 
                                         {symbol tables}
@@ -307,26 +294,19 @@ type
   typeQualifierEnum = (tqConst, tqVolatile, tqRestrict);
   typeQualifierSet = set of typeQualifierEnum;
 
-  typeKind = (scalarType,arrayType,pointerType,nullptrType,functionType,
-              enumType,enumConst,structType,unionType,definedType);
+  typeKind = (scalarType,arrayType,pointerType,functionType,enumType,
+              enumConst,structType,unionType,definedType);
   typeRecord = record                   {type}
-     size: longint;                     {size of the type in bytes (1 for VLA)}
+     size: longint;                     {size of the type in bytes}
      qualifiers: typeQualifierSet;      {type qualifiers}
      saveDisp: longint;			{disp in symbol file}
      case kind: typeKind of             {NOTE: aType,pType and fType must overlap}
         scalarType  : (baseType: baseTypeEnum;  {our internal type representation}
-                       cType: cTypeEnum;        {type in the C type system}
-                       bitIntWidth: integer);   {width of a _BitInt type}
+                       cType: cTypeEnum);       {type in the C type system}
         arrayType   : (aType: typePtr;
-                       elements: longint;       {number of elements; 0 if unknown}
-                       isVariableLength: boolean;
-                       sizeLLN: integer;        {LLN of VLA size var; 0 for [*]}
-                       sizeTree: tokenPtr;      {used during VLA type construction}
-                       aQualifiers: typeQualifierSet; {qualifiers within []}
+                       elements: longint;
                       );
-        pointerType : (pType: typePtr;
-                       wasStarVLA: boolean;);   {adjusted from VLA type with [*]?}
-        nullptrType : ();
+        pointerType : (pType: typePtr;);
         functionType: (fType: typePtr;          {return type}
                        varargs,                 {are there a variable # of args?}
                        prototyped: boolean;     {is it prototyped?}
@@ -336,13 +316,8 @@ type
                        toolNum: integer;        {non-zero for tool functions}
                        dispatcher: longint;     {dispatch addr}
                       );
-        enumConst   : (ecType: typePtr;         {type of this enum const}
-                       containingEnum: typePtr; {containing enum type (if tagged)}
-                       eval: i65;);             {value of enum const}
-        enumType    : (underlyingType: typePtr; {underlying integer type}
-                       fixedUnderlyingType: boolean; {has fixed underlying type?}
-                       ecCount: longint;        {number of enum constants}
-                       doingEnumerators: boolean;); {currently parsing the enumerators?}
+        enumConst   : (eval: integer;);
+        enumType    : ();
         definedType : (dType: typePtr;);
         structType,
         unionType   : (fieldList: identPtr;	{field list}
@@ -406,8 +381,6 @@ type
      isForwardDeclared: boolean;        {does this var use a forward declared type?}
      class: tokenEnum;                  {storage class}
      used: boolean;                     {is this identifier used?}
-     underspecified: boolean;           {not yet fully specified (need initializer)?}
-     nextVMSym: identPtr;               {previous symbol of variably modified type}
      case storage: storageType of
         stackFrame: (lln: integer;      {local label #}
                      clnext: identPtr); {next compound literal}
@@ -542,6 +515,7 @@ var
    nameFound: boolean;                  {has a pc_nam been generated?}
    nextLocalLabel: integer;             {next available local data label number}
    numErrors: integer;                  {number of errors in the program}
+   numLintErrors: integer;               {number of lint errors (when lintIsError)}
    objFile: gsosOutString;              {object file name}
    oldincludeFileGS: gsosOutString;	{previous includeFile value}
    outFileGS: gsosOutString;		{keep file name}
@@ -550,11 +524,8 @@ var
    sourceFileGS: gsosOutString;         {presumed source file name}
    strictMode: boolean;                 {strictly follow standard, without extensions?}
    tempList: tempPtr;                   {list of temp work variables}
-   vlaTrees: 0..maxint4;                {number of trees for computing VLA sizes}
    longlong0: longlong;                 {the value 0 as a longlong}
    longlong1: longlong;                 {the value 1 as a longlong}
-   i65_zero: i65;                       {the value 0 as an i65}
-   i65_minus1: i65;                     {the value -1 as an i65}
 
                                         {expression results}
                                         {------------------}
@@ -598,14 +569,6 @@ var
                                         {---------------------------}
    specifierQualifierListElement: tokenSet;
    topLevelDeclarationStart: tokenSet;
-
-                                        {base types}
-                                        {----------}
-   charPtr,sCharPtr,uCharPtr,shortPtr,uShortPtr,intPtr,uIntPtr,int32Ptr,
-      uInt32Ptr,longPtr,uLongPtr,longLongPtr,uLongLongPtr,boolPtr,
-      floatPtr,doublePtr,compPtr,extendedPtr,stringTypePtr,utf8StringTypePtr,
-      utf16StringTypePtr,utf32StringTypePtr,voidPtr,voidPtrPtr,charPtrPtr,
-      vaInfoPtr,constCharPtr,nullptr_tPtr,defaultStruct: typePtr;
 
 {---------------------------------------------------------------}
 
@@ -734,8 +697,8 @@ implementation
 
 const
                                         {Note: maxLabel is also defined in cgi.pas}
-                                        {Note: maxlabel is also defined in CGC.asm}
-   maxLabel = 3275;			{max # compiler generated labels}
+                                        {Note: maxlabel no longer defined in CGC.asm (InitLabels now in Native2.pas)}
+   maxLabel = 16383;			{max # compiler generated labels}
 
 					{spinner}
                                         {-------}
@@ -936,11 +899,6 @@ longlong0.hi := 0;
 longlong0.lo := 0;
 longlong1.hi := 0;
 longlong1.lo := 1;
-i65_zero.sign := 0;
-i65_zero.ll := longlong0;
-i65_minus1.sign := -1;
-i65_minus1.ll.hi := -1;
-i65_minus1.ll.lo := -1;
 end; {InitCCommon}
 
 
@@ -955,6 +913,40 @@ procedure ReadFile;
 
 const
    SRC   = $B0;                         {source file type}
+
+type
+   bytePtr = ^byte;                     {pointer to a byte}
+
+   rfOpenDCB = record                   {OpenGS parameter block}
+      pcount: integer;
+      refNum: integer;
+      pathName: gsosInStringPtr;
+      requestAccess: integer;
+      end;
+
+   rfReadDCB = record                   {ReadGS parameter block}
+      pcount: integer;
+      refNum: integer;
+      dataBuffer: ptr;
+      requestCount: longint;
+      transferCount: longint;
+      end;
+
+   rfCloseDCB = record                  {CloseGS parameter block}
+      pcount: integer;
+      refNum: integer;
+      end;
+
+var
+   p: bytePtr;                          {work pointer for line ending fix}
+   fileEnd: ptr;                        {end of file buffer}
+   opRec: rfOpenDCB;                    {for re-reading raw bytes}
+   rdRec: rfReadDCB;
+   clRec: rfCloseDCB;
+
+   procedure rfOpenGS (var parms: rfOpenDCB); prodos ($2010);
+   procedure rfReadGS (var parms: rfReadDCB); prodos ($2012);
+   procedure rfCloseGS (var parms: rfCloseDCB); prodos ($2014);
 
 begin {ReadFile}
 with ffDCBGS do begin			{read the source file}
@@ -974,6 +966,32 @@ if ffDCBGS.fileType <> SRC then begin
    TermError(6);
    end; {if}
 bofPtr := ffDCBGS.fileHandle^;		{set beginning of file pointer}
+
+{Re-read the file to fix GoldenGate's text conversion   }
+{which incorrectly collapses consecutive LF characters. }
+{We re-read the raw bytes and convert LF to CR ourselves.}
+opRec.pCount := 3;
+opRec.pathName := @includeFileGS.theString;
+opRec.requestAccess := 1;               {read access}
+rfOpenGS(opRec);
+if ToolError = 0 then begin
+   rdRec.pCount := 4;
+   rdRec.refNum := opRec.refNum;
+   rdRec.dataBuffer := bofPtr;
+   rdRec.requestCount := ffDCBGS.fileLength;
+   rfReadGS(rdRec);
+   clRec.pCount := 1;
+   clRec.refNum := opRec.refNum;
+   rfCloseGS(clRec);
+   {convert LF to CR}
+   p := bytePtr(bofPtr);
+   fileEnd := pointer(ord4(bofPtr) + ffDCBGS.fileLength);
+   while ord4(p) < ord4(fileEnd) do begin
+      if p^ = 10 then                   {LF}
+         p^ := 13;                      {CR}
+      p := bytePtr(ord4(p) + 1);
+      end; {while}
+   end; {if}
 end; {ReadFile}
 
 

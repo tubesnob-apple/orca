@@ -78,11 +78,6 @@ function MakeCompoundLiteral(tp: typePtr): identPtr;
 {       tp - the type of the compound literal                   }
 
 
-procedure EnableCodeGen;
-
-{  Start and enable code generator, if not already enabled      }
-
-
 procedure InitParser;
 
 { Initialize the parser                                         }
@@ -160,13 +155,12 @@ type
          switchSt: (
             maxVal: longint;            {max switch value}
             ln: integer;                {temp var number}
-            tp: typePtr;                {temp var type}
+            size: integer;              {temp var size}
             labelCount: integer;        {# of switch labels}
             switchExit: integer;        {branch point}
             switchLab: integer;         {branch point}
             switchList: switchPtr;      {list of labels and values}
             switchDefault: integer;     {default branch point}
-            lastVMSym: identPtr;        {variably modified sym before switch}
             );
       end;
 
@@ -175,7 +169,6 @@ type
    declSpecifiersRecord = record
       storageClass: tokenEnum;          {storage class of the declaration}
       typeSpec: typePtr;                {type specifier}
-      inferType: boolean;               {should type be inferred?}
       declarationModifiers: tokenSet;   {all storage class specifiers, type }
                                         {qualifiers, function specifiers, & }
                                         {alignment specifiers in declaration}
@@ -204,15 +197,10 @@ var
                                         {parameter processing variables}
                                         {------------------------------}
    lastParameter: identPtr;             {next parameter to process}
+   numberOfParameters: integer;         {number of indeclared parameters}
    pfunc: identPtr;                     {func. for which parms are being defined}
    protoType: typePtr;                  {type from a parameter list}
    protoVariable: identPtr;             {variable from a parameter list}
-   parameterCode: codeRef;              {code generated for function params}
-
-                                        {attribute processing variables}
-                                        {------------------------------}
-   haveAttributeSpecifier: boolean;     {was an attribute specifier found?}
-   keepAttributes: boolean;             {keep existing attributes?}
 
                                         {syntactic classes of tokens}
                                         {---------------------------}
@@ -221,7 +209,6 @@ var
    localDeclarationStart: tokenSet;
    declarationSpecifiersElement: tokenSet;
    structDeclarationStart: tokenSet;
-   prototypeParameterDeclarationStart: tokenSet;
 
 {-- External procedures ----------------------------------------}
 
@@ -255,22 +242,6 @@ if token.kind = kind then
 else
    Error(err);
 end; {Match}
-
-
-function PeekToken: tokenEnum;
-
-{ peek at next token and get its kind                           }
-
-var
-   tToken: tokenType;                   {temporary copy of current token}
-
-begin {PeekToken}
-tToken := token;
-NextToken;
-PeekToken := token.kind;
-PutBackToken(token, false, true);
-token := tToken;
-end; {PeekToken}
 
 
 procedure SkipStatement;
@@ -323,7 +294,6 @@ gotoList := gt;
 gt^.name := token.name;
 gt^.lab := GenLabel;
 gt^.defined := false;
-gt^.lastVMSym := table^.lastVMSym;
 1:
 if op = dc_lab then begin
    if gt^.defined then
@@ -331,178 +301,11 @@ if op = dc_lab then begin
    else begin
       gt^.defined := true;
       Gen1(dc_lab, gt^.lab);
-      if not VariablyModifiedSymInList(table^.lastVMSym, gt^.lastVMSym) then
-         Error(202);
-      gt^.lastVMSym := table^.lastVMSym;
       end; {else}
    end {if}
-else begin
+else
    Gen1(pc_ujp, gt^.lab);
-   if gt^.defined then
-      if not VariablyModifiedSymInList(gt^.lastVMSym, table^.lastVMSym) then
-         Error(202);
-   end; {else}
 end; {GotoLabel}
-
-
-{-- Attributes -------------------------------------------------}
-
-procedure Attribute;
-
-{ handle an attribute                                           }
-
-var
-   prefixName, attrName: stringPtr;     {attribute prefix and name}
-
-
-   procedure MakeIdentToken;
-   
-   { Make token into an ident token.  It must be an identifier, }
-   { typedef name, or reserved word to begin with.              }
-   
-   begin {MakeIdentToken}
-   if token.class = reservedWord then begin
-      token.name := @reservedWords[token.kind];
-      token.kind := ident;
-      token.class := identifier;
-      end {if}
-   else if token.kind = typedef then
-      token.kind := ident;
-   end; {MakeIdentToken}
-
-
-   procedure BalancedTokens;
-   
-   { Parse a balanced token sequence (where all parentheses,    }
-   { brackets, and braces are balanced and properly nested).    }
-   { The sequence starts with ( and ends with the matching ).   }
-
-   type
-      delimiterRecPtr = ^delimiterRec;
-      delimiterRec = record
-         endToken: tokenEnum;
-         next: delimiterRecPtr;
-         end;
-
-   var
-      nestedDelimiters: delimiterRecPtr; {stack of nested delimiters}
-      tDelimiters: delimiterRecPtr;     {work pointer}
-
-   begin {BalancedTokens}
-   nestedDelimiters := nil;
-   repeat
-      if token.kind in [lparench,lbracech,lbrackch] then begin
-         new(tDelimiters);
-         tDelimiters^.next := nestedDelimiters;
-         case token.kind of
-            lparench: tDelimiters^.endToken := rparench;
-            lbracech: tDelimiters^.endToken := rbracech;
-            lbrackch: tDelimiters^.endToken := rbrackch;
-            end; {case}
-         nestedDelimiters := tDelimiters;
-         end {if}
-      else if token.kind in [rparench,rbracech,rbrackch] then begin
-         if nestedDelimiters^.endToken = token.kind then begin
-            tDelimiters := nestedDelimiters;
-            nestedDelimiters := nestedDelimiters^.next;
-            dispose(tDelimiters);
-            end {if}
-         else
-            Error(194);
-         end; {else if}
-      NextToken;
-   until (nestedDelimiters = nil) or (token.kind = eofsy);
-   while nestedDelimiters <> nil do begin
-      tDelimiters := nestedDelimiters;
-      nestedDelimiters := nestedDelimiters^.next;
-      dispose(tDelimiters);      
-      end; {while}
-   end; {BalancedTokens}
-
-begin {Attribute}
-if token.class in [reservedWord,identifier] then begin
-   MakeIdentToken;
-   prefixName := nil;
-   new(attrName);
-   attrName^ := token.name^;
-   NextToken;
-
-   if token.kind = coloncolonsy then begin
-      NextToken;
-      if token.class in [reservedWord,identifier] then begin
-         MakeIdentToken;
-         prefixName := attrName;
-         new(attrName);
-         attrName^ := token.name^;
-         NextToken;
-         end {if}
-      else
-         Error(9);
-      end; {if}
-
-   if prefixName = nil then
-      if not ((attrName^ = 'deprecated') or (attrName^ = '__deprecated__')
-         or (attrName^ = 'fallthrough') or (attrName^ = '__fallthrough__')
-         or (attrName^ = 'maybe_unused') or (attrName^ = '__maybe_unused__')
-         or (attrName^ = 'nodiscard') or (attrName^ = '__nodiscard__')
-         or (attrName^ = 'noreturn') or (attrName^ = '__noreturn__')
-         or (attrName^ = '_Noreturn') or (attrName^ = '___Noreturn__')
-         or (attrName^ = 'unsequenced') or (attrName^ = '__unsequenced__')
-         or (attrName^ = 'reproducible') or (attrName^ = '__reproducible__'))
-         then
-         Error(193);
-
-   if token.kind = lparench then
-      BalancedTokens;
-
-   dispose(attrName);
-   if prefixName <> nil then
-      dispose(prefixName);
-   end {if}
-else
-   Error(9);
-end; {Attribute}
-
-
-procedure AttributeSpecifierSequence;
-
-{ handle a possible attribute specifier sequence                }
-
-label 1;
-
-begin {AttributeSpecifierSequence}
-if not keepAttributes then
-   haveAttributeSpecifier := false
-else
-   keepAttributes := false;
-if (cStd >= c23) or not strictMode then
-   while token.kind = lbrackch do begin
-      NextToken;
-      if token.kind <> lbrackch then begin
-         PutBackToken(token, false, true);
-         token.kind := lbrackch;
-         token.class := reservedSymbol;
-         goto 1;
-         end; {if}
-      NextToken;
-
-      haveAttributeSpecifier := true;
-      
-      while token.kind <> rbrackch do begin
-         Attribute;
-         if token.kind = commach then
-            NextToken
-         else if token.kind <> rbrackch then begin
-            Error(24);
-            goto 1;
-            end; {else if}
-         end; {if}
-      
-      Match(rbrackch, 24);
-      Match(rbrackch, 24);
-      end; {while}
-1:
-end; {AttributeSpecifierSequence}
 
 
 {-- Statements -------------------------------------------------}
@@ -564,9 +367,8 @@ if not doingFunction then begin         {if so, finish it off}
                end; {else if}
             end {if}
          else if fType^.kind = enumType then begin
-            Error(enumTypeUsed);
-            {Gen1t(pc_ldc, 0, cgWord);
-            Gen2t(pc_str, 0, 0, cgWord);}
+            Gen1t(pc_ldc, 0, cgWord);
+            Gen2t(pc_str, 0, 0, cgWord);
             end; {else if}
          end; {if}
       Gen1(dc_lab, returnLabel);
@@ -584,11 +386,10 @@ if not doingFunction then begin         {if so, finish it off}
                           Gen1Name(pc_lao, 0, structReturnVar^.name);
                           Gen0t(pc_rev, cgULong);
                           end;
-            pointerType ,
-            nullptrType : Gen0t(pc_ret, cgULong);
+            pointerType : Gen0t(pc_ret, cgULong);
             functionType: ;
             enumConst   : ;
-            enumType    : Error(enumTypeUsed); {Gen0t(pc_ret, cgWord);}
+            enumType    : Gen0t(pc_ret, cgWord);
             definedType : ;
             otherwise: Error(57);
             end; {case}
@@ -640,7 +441,7 @@ if (lastLine <> lineNumber) or changedSourceFile then begin
 end; {RecordLineNumber}
 
 
-procedure Statement (doingBlockItems: boolean);
+procedure Statement;
 
 { handle a statement                                            }
 
@@ -725,43 +526,40 @@ var
    end; {BreakStatement}
 
 
-   procedure CaseLabel;
+   procedure CaseStatement;
  
-   { handle a case label                                         }
+   { handle a case statement                                     }
 
    var
       stPtr: statementPtr;              {switch record for this case label}
       swPtr,swPtr2: switchPtr;          {work pointers for inserting new entry}
       val: longlong;                    {case label value}
 
-   begin {CaseLabel}
+   begin {CaseStatement}
    while token.kind = casesy do begin
       NextToken;                        {skip the 'case' token}
       stPtr := GetSwitchRecord;         {get the proper switch record}
-      Expression(integerConstantExpression, [colonch]); {evaluate the branch condition}
+      Expression(arrayExpression, [colonch]); {evaluate the branch condition}
       GetLLExpressionValue(val);
+      if stPtr^.size = cgLongSize then begin {convert out-of-range values}
+         if val.lo < 0 then
+            val.hi := -1
+         else
+            val.hi := 0;
+         end {if}
+      else if stPtr^.size = cgWordSize then begin
+         if long(val.lo).lsw < 0 then begin
+            val.hi := -1;
+            val.lo := val.lo | $FFFF0000;
+            end {if}
+         else begin
+            val.hi := 0;
+            val.lo := val.lo & $0000FFFF;
+            end; {else}
+         end; {else if}
       if stPtr = nil then
          Error(72)
       else begin
-         if table^.lastVMSym <> stPtr^.lastVMSym then
-            Error(202);
-         if stPtr^.tp^.size = cgLongSize then begin {convert out-of-range values}
-            if val.lo < 0 then
-               val.hi := -1
-            else
-               val.hi := 0;
-            end {if}
-         else if stPtr^.tp^.size = cgWordSize then begin
-            if long(val.lo).lsw < 0 then begin
-               val.hi := -1;
-               val.lo := val.lo | $FFFF0000;
-               end {if}
-            else begin
-               val.hi := 0;
-               val.lo := val.lo & $0000FFFF;
-               end; {else}
-            end; {else if}
-         ExtendBitIntValue(val, stPtr^.tp);
          new(swPtr2);                   {create the new label table entry}
          swPtr2^.lab := GenLabel;
          Gen1(dc_lab, swPtr2^.lab);
@@ -800,7 +598,8 @@ var
 
       Match(colonch,29);                {get the colon}
       end; {while}
-   end; {CaseLabel}
+   Statement;                           {process the labeled statement}
+   end; {CaseStatement}
 
 
    procedure ContinueStatement;
@@ -831,28 +630,27 @@ var
    end; {ContinueStatement}
 
 
-   procedure DefaultLabel;
+   procedure DefaultStatement;
  
-   { handle a default label                                      }
+   { handle a default statement                                  }
  
    var
       stPtr: statementPtr;              {work pointer}
 
-   begin {DefaultLabel}
+   begin {DefaultStatement}
    NextToken;                           {skip the 'default' token}
+   Match(colonch,29);                   {get the colon}
    stPtr := GetSwitchRecord;            {record the presense of a default label}
    if stPtr = nil then
       Error(72)
    else if stPtr^.switchDefault <> 0 then
       Error(74)
    else begin
-      if table^.lastVMSym <> stPtr^.lastVMSym then
-         Error(202);
       stPtr^.switchDefault := GenLabel;
       Gen1(dc_lab, stPtr^.switchDefault);
       end; {else}
-   Match(colonch,29);                   {get the colon}
-   end; {DefaultLabel}
+   Statement;                           {process the labeled statement}
+   end; {DefaultStatement}
 
 
    procedure DoStatement;
@@ -876,7 +674,7 @@ var
    stPtr^.continueLab := 0;
    if c99Scope then PushTable;
    if c99Scope then PushTable;
-   Statement(false);                    {process the first loop body statement}
+   Statement;                           {process the first loop body statement}
    end; {DoStatement}
 
 
@@ -935,7 +733,7 @@ var
    Match(rparench,12);                  {get the closing for loop paren}
 
    if c99Scope then PushTable;
-   Statement(false);                    {process the first loop body statement}
+   Statement;                           {process the first loop body statement}
    end; {ForStatement}
 
 
@@ -964,7 +762,7 @@ var
    stPtr^.kind := ifSt;
    stPtr^.ifLab := lab;
    if c99Scope then PushTable;
-   Statement(false);                    {process the 'true' statement}
+   Statement;                           {process the 'true' statement}
    end; {IfStatement}
 
 
@@ -984,11 +782,11 @@ var
    end; {GotoStatement}
 
 
-   procedure NamedLabel;
+   procedure LabelStatement;
  
-   { handle a named labeled                                      }
+   { handle a labeled statement                                  }
  
-   begin {NamedLabel}
+   begin {LabelStatement}
    GotoLabel(dc_lab);                   {define the label}
    NextToken;                           {skip the label}
    if token.kind = colonch then         {if present, skip the colon}
@@ -997,7 +795,7 @@ var
       Error(31);
       SkipStatement;
       end; {else}
-   end; {NamedLabel}
+   end; {LabelStatement}
 
 
    procedure ReturnStatement;
@@ -1050,9 +848,8 @@ var
                            Gen0t(pc_sto, fType^.baseType)
                         else
                            ReturnValue(fType^.baseType);
-         enumType:      Error(enumTypeUsed); {ReturnValue(cgWord);}
-         pointerType,
-         nullptrType:   ReturnValue(cgULong);
+         enumType:      ReturnValue(cgWord);
+         pointerType:   ReturnValue(cgULong);
          structType,
          unionType:     begin
                         Gen2(pc_mov, long(size).msw, long(size).lsw);
@@ -1080,7 +877,6 @@ var
    var
       stPtr: statementPtr;              {work pointer}
       tp: typePtr;                      {for checking type}
-      baseType: baseTypeEnum;           {base type of controlling expression}
  
    begin {SwitchStatement}
    NextToken;                           {skip the 'switch' token}
@@ -1095,11 +891,9 @@ var
    stPtr^.breakLab := stPtr^.switchExit;
    stPtr^.switchList := nil;
    stPtr^.switchDefault := 0;
-   stPtr^.lastVMSym := table^.lastVMSym;
    if c99Scope then PushTable;
    Match(lparench, 13);                 {evaluate the condition}
    Expression(normalExpression,[rparench]);
-   baseType := UsualUnaryConversions;
    Match(rparench, 12);
    tp := expressionType;                {make sure the expression is integral}
    while tp^.kind = definedType do
@@ -1107,21 +901,36 @@ var
    case tp^.kind of
 
       scalarType:
-         if not (tp^.baseType in [cgQuad,cgUQuad,cgLong,cgULong,cgWord,cgUWord,
-            cgByte,cgUByte]) then
+         if tp^.baseType in [cgQuad,cgUQuad] then begin
+            stPtr^.size := cgQuadSize;
+            stPtr^.ln := GetTemp(cgQuadSize);
+            Gen2t(pc_str, stPtr^.ln, 0, cgQuad);
+            end {if}
+         else if tp^.baseType in [cgLong,cgULong] then begin
+            stPtr^.size := cgLongSize;
+            stPtr^.ln := GetTemp(cgLongSize);
+            Gen2t(pc_str, stPtr^.ln, 0, cgLong);
+            end {if}
+         else if tp^.baseType in [cgByte,cgUByte,cgWord,cgUWord] then begin
+            stPtr^.size := cgWordSize;
+            stPtr^.ln := GetTemp(cgWordSize);
+            Gen2t(pc_str, stPtr^.ln, 0, cgWord);
+            end {else if}
+         else
             Error(71);
 
-      enumType: {OK};
+      enumType: begin
+         stPtr^.size := cgWordSize;
+         stPtr^.ln := GetTemp(cgWordSize);
+         Gen2t(pc_str, stPtr^.ln, 0, cgWord);
+         end;
 
       otherwise:
          Error(71);
       end; {case}
-   stPtr^.tp := tp;                     {record controlling type}
-   stPtr^.ln := GetTemp(ord(tp^.size)); {save controlling value in temp}
-   Gen2t(pc_str, stPtr^.ln, 0, baseType);
    Gen1(pc_ujp, stPtr^.switchLab);      {branch to the xjp instruction}
    if c99Scope then PushTable;
-   Statement(false);                    {process the loop body statement}
+   Statement;                           {process the loop body statement}
    end; {SwitchStatement}
 
 
@@ -1153,11 +962,10 @@ var
    CompareToZero(pc_neq);               {evaluate the condition}
    Gen1(pc_fjp, endl);
    if c99Scope then PushTable;
-   Statement(false);                    {process the first loop body statement}
+   Statement;                           {process the first loop body statement}
    end; {WhileStatement}
 
 begin {Statement}
-vlaTrees := 0;
 1:
 {if trace names are enabled and a line # is due, generate it}
 if traceBack or debugFlag then
@@ -1165,26 +973,15 @@ if traceBack or debugFlag then
       RecordLineNumber(lineNumber);
 
 {handle the statement}
-AttributeSpecifierSequence;
 case token.kind of
    asmsy:               begin
                         NextToken;
                         AsmStatement;
                         end;
    breaksy:             BreakStatement;
-   casesy:              begin
-                        CaseLabel;
-                        if ((cStd < c23) and strictMode)
-                           or not doingBlockItems then
-                           goto 1;
-                        end;
+   casesy:              CaseStatement;
    continuesy:          ContinueStatement;
-   defaultsy:           begin
-                        DefaultLabel;
-                        if ((cStd < c23) and strictMode)
-                           or not doingBlockItems then
-                           goto 1;
-                        end;
+   defaultsy:           DefaultStatement;
    dosy:                DoStatement;
    elsesy:              begin Error(25); SkipStatement; end;
    forsy:               ForStatement;
@@ -1200,10 +997,8 @@ case token.kind of
                         token := lToken;
                         suppressMacroExpansions := lSuppressMacroExpansions;
                         if tToken.kind = colonch then begin
-                           NamedLabel;
-                           if ((cStd < c23) and strictMode)
-                              or not doingBlockItems then
-                              goto 1;
+                           LabelStatement;
+                           goto 1;
                            end {if}
                         else
                            AssignmentStatement;
@@ -1211,11 +1006,7 @@ case token.kind of
    ifsy:                IfStatement;
    lbracech:            CompoundStatement(true);
    returnsy:            ReturnStatement;
-   semicolonch:         begin
-                        if haveAttributeSpecifier then
-                           Error(192);
-                        NextToken;
-                        end;
+   semicolonch:         NextToken;
    switchsy:            SwitchStatement;
    whilesy:             WhileStatement;
    otherwise:           AssignmentStatement;
@@ -1280,7 +1071,7 @@ if token.kind = elsesy then begin       {if an else clause exists, process it}
    stPtr^.kind := elseSt;
    stPtr^.elseLab := lab2;
    if c99Scope then PushTable;
-   Statement(false);                    {evaluate the else clause}
+   Statement;                           {evaluate the else clause}
    end {if}
 else begin
    Gen1(dc_lab, lab1);                  {create label for if to branch to}
@@ -1350,8 +1141,8 @@ begin {EndSwitchStatement}
 if c99Scope then PopTable;
 stPtr := statementList;                 {get the statement record}
 exitLab := stPtr^.switchExit;           {get the exit label}
-isLong := stPtr^.tp^.size = cgLongSize; {get the long flag}
-isLongLong := stPtr^.tp^.size = cgQuadSize; {get the long long flag}
+isLong := stPtr^.size = cgLongSize;     {get the long flag}
+isLongLong := stPtr^.size = cgQuadSize; {get the long long flag}
 swPtr := stPtr^.switchList;             {Skip further generation if there were}
 if swPtr <> nil then begin              { no labels.                          }
    default := stPtr^.switchDefault;     {get a default label}
@@ -1419,7 +1210,7 @@ else begin
 
    Gen1(dc_lab, exitLab);               {generate the default label}
    end; {else}
-FreeTemp(stPtr^.ln, ord(stPtr^.tp^.size)); {release temp variable}
+FreeTemp(stPtr^.ln, stPtr^.size);       {release temp variable}
 statementList := stPtr^.next;           {pop the statement record}
 dispose(stPtr);
 if c99Scope then PopTable;
@@ -1445,119 +1236,7 @@ end; {EndWhileStatement}
 
 {-- Type declarations ------------------------------------------}
 
-procedure AbortTypeInference(var declSpecifiers: declSpecifiersRecord);
-
-{ Stop trying do to type inference using declaration specifiers }
-{                                                               }
-{ This is called in situations where the declaration specifiers }
-{ contained "auto" and initially appeared to be eligible for    }
-{ type inference, but subsequent parts of the declaration did   }
-{ not meet the requirements for it.  This will revert back to   }
-{ the C89-style "implicit int" interpretation of the            }
-{ declaration specifiers, if that is allowed by the syntax and  }
-{ the compilation settings.  Otherwise, it gives an error.      }
-{                                                               }
-{ parameters:                                                   }
-{       declSpecifiers - type/specifiers to use                 }
-
-begin {AbortTypeInference}
-declSpecifiers.inferType := false;
-if not doingFunction or (declSpecifiers.storageClass <> ident) then
-   Error(197)
-else begin
-   {revert to C89-style implicit int interpretation of "auto"}
-   declSpecifiers.storageClass := autosy;
-   if (lint & lintC99Syntax) <> 0 then
-      Error(151);
-   end; {else}
-end; {AbortTypeInference}
-
-
-procedure ArrayLengthExpression(tPtr: typePtr);
-
-{ Handle an array length expression and fill out relevant parts }
-{ of the array type.                                            }
-{                                                               }
-{ parameters:                                                   }
-{       tPtr - an array ptr with length info not yet filled in  }
-
-begin {ArrayLengthExpression}
-if doingParameters or doingFunction then
-   Expression(autoInitializerExpression, [rbrackch,semicolonch,commach])
-else
-   Expression(integerConstantExpression, [rbrackch,semicolonch,commach]);
-if isConstant then begin
-   if (expressionType^.kind <> scalarType)
-      or (expressionType^.baseType in [cgReal,cgDouble,cgComp,cgExtended,cgVoid])
-      then begin
-      Error(47);
-      expressionValue := 1;
-      end {if}
-   else if expressionValue <= 0 then begin
-      Error(45);
-      expressionValue := 1;
-      end; {if}
-   tPtr^.isVariableLength := false;
-   tPtr^.elements := expressionValue;
-   end {if}
-else begin
-   tPtr^.isVariableLength := true;
-   tPtr^.size := 1; {dummy size for VLA}
-   tPtr^.sizeTree := initializerTree;
-   tPtr^.elements := 0;
-   end; {else}
-end; {ArrayLengthExpression}
-
-
-procedure ComputeArraySize(tPtr: typePtr);
-
-{ Compute array size, either statically or dynamically.         }
-{                                                               }
-{ For non-VLA array types, this fills in tPtr^.size with the    }
-{ statically computed size.  For VLA types, this generates code }
-{ to compute the size dynamically and store it in the hidden    }
-{ size variable, which will be specified by tPtr^.sizeLLN.      }
-{                                                               }
-{ parameters:                                                   }
-{       tPtr - an array ptr with size info not yet filled in    }
-
-begin {ComputeArraySize}
-if not tPtr^.isVariableLength and not IsVLAType(tPtr^.aType) then
-   tPtr^.size := tPtr^.aType^.size * tPtr^.elements
-else if tPtr^.isVariableLength and (tPtr^.sizeTree = nil) then
-   tPtr^.sizeLLN := 0
-else begin                              {generate VLA size code}
-   EnableCodeGen;                       {init the code generator (if it needs it)}
-   tPtr^.sizeLLN := GetLocalLabel;
-   Gen2(dc_loc, tPtr^.sizeLLN, cgLongSize);
-   if IsVLAType(tPtr^.aType) then
-      Gen2t(pc_lod, tPtr^.aType^.sizeLLN, 0, cgULong)
-   else
-      GenLdcLong(tPtr^.aType^.size);
-   if tPtr^.isVariableLength then begin
-      GenerateCode(tPtr^.sizeTree);
-      if expressionType^.kind = scalarType then
-         if expressionType^.baseType = cgWord then
-            expressionType := uIntPtr   {avoid generating sign extension code}
-         else if expressionType^.baseType in
-            [cgReal,cgDouble,cgComp,cgExtended] then
-            Error(47);
-      AssignmentConversion(uLongPtr, expressionType, false, 0, true, false);
-      end {if}
-   else begin
-      tPtr^.isVariableLength := true;
-      tPtr^.size := 1; {dummy size for VLA}
-      GenLdcLong(tPtr^.elements);
-      end; {else}
-   Gen0(pc_uml);
-   Gen2t(pc_str, tPtr^.sizeLLN, 0, cgULong);
-   if codeGeneration then
-      vlaTrees := vlaTrees + 1;
-   end; {else}
-end; {ComputeArraySize}
-
-
-procedure Declarator(var declSpecifiers: declSpecifiersRecord;
+procedure Declarator(declSpecifiers: declSpecifiersRecord;
    var variable: identPtr; space: spaceType; doingPrototypes: boolean);
 
 { handle a declarator                                           }
@@ -1617,15 +1296,14 @@ var
       cp,cpList: pointerListPtr;        {pointer list}
       done,done2: boolean;              {for loop termination}
       isPtr: boolean;                   {is the parenthesized expr a ptr?}
+      isVoid: boolean;                  {is the type specifier void?}
       wp: parameterPtr;                 {used to build prototype var list}
       pvar: identPtr;                   {work pointer}
       tPtr2: typePtr;                   {work pointer}
       ttPtr: typeDefPtr;                {work pointer}
       parencount: integer;              {for skipping in parm list}
       gotStatic: boolean;               {got 'static' in array declarator?}
-      numberOfParameters: integer;      {number of K&R-style parameters}
-      parameterCodeLoc: codeRef;        {code generated for function params}
-
+ 
                                         {variables used to preserve states}
                                         { across recursive calls          }
                                         {---------------------------------}
@@ -1633,32 +1311,6 @@ var
       lLastParameter: identPtr;         {next parameter to process}
       lSuppressMacroExpansions: boolean;{local copy of suppressMacroExpansions}
       ldeclaredTagOrEnumConst: boolean; {local copy of declaredTagOrEnumConst}
-
-
-      procedure MakeUnnamedParameter;
-      
-      { make a variable for an unnamed parameter in a prototype }
-      
-      begin {MakeUnnamedParameter}
-      pvar := pointer(Calloc(sizeof(identRecord)));
-      {pvar^.next := nil;}
-      {pvar^.saved := 0;}
-      pvar^.name := @'?';
-      pvar^.itype := tPtr;
-      {pvar^.disp := 0;}
-      {pvar^.bitDisp := 0;}
-      {pvar^.bitsize := 0;}
-      {pvar^.initialized := false;}
-      {pvar^.iPtr := nil;}
-      {pvar^.isForwardDeclared := false;}
-      pvar^.class := autosy;
-      pvar^.storage := parameter;
-      variable := pvar;
-      lastWasIdentifier := true;
-      newName := nil;
-      unnamedParm := true;
-      end; {MakeUnnamedParameter}
-
 
    begin {StackDeclarations}
    lastWasIdentifier := false;          {used to see if the declaration is a fn}
@@ -1695,7 +1347,6 @@ var
          else
             checkParms := true;
          NextToken;
-         AttributeSpecifierSequence;
          if token.kind = eqch then
             state := initialized;
          lastWasIdentifier := true;
@@ -1704,7 +1355,6 @@ var
       asteriskch: begin                 {handle '*' 'declarator'}
          while token.kind = asteriskch do begin
             NextToken;
-            AttributeSpecifierSequence;
             new(cp);
             cp^.next := cpList;
             cpList := cp;
@@ -1726,29 +1376,35 @@ var
          StackDeclarations;
          end;
 
-      lparench: begin
+      lparench: begin                   {handle '(' 'declarator' ')'}
          NextToken;
-         if doingPrototypes
-            and (token.kind in prototypeParameterDeclarationStart)
-            and ((token.kind <> lbrackch) or (PeekToken = lbrackch))
-            then begin                  { unnamed param declared with fn type }
-            PutBackToken(token, false, true);
-            token.kind := lparench;
-            token.class := reservedSymbol;
-            MakeUnnamedParameter;
-            end {if}
-         else begin                     {handle '(' 'declarator' ')'}
-            isPtr := token.kind = asteriskch;
-            StackDeclarations;
-            Match(rparench,12);
-            if isPtr then
-               lastWasIdentifier := false;
-            end; {else}
+         isPtr := token.kind = asteriskch;
+         StackDeclarations;
+         Match(rparench,12);
+         if isPtr then
+            lastWasIdentifier := false;
          end;
 
       otherwise:
-         if doingPrototypes then        {allow for unnamed parameters}
-            MakeUnnamedParameter;
+         if doingPrototypes then begin  {allow for unnamed parameters}
+            pvar := pointer(Calloc(sizeof(identRecord)));
+            {pvar^.next := nil;}
+            {pvar^.saved := 0;}
+            pvar^.name := @'?';
+            pvar^.itype := tPtr;
+            {pvar^.disp := 0;}
+            {pvar^.bitDisp := 0;}
+            {pvar^.bitsize := 0;}
+            {pvar^.initialized := false;}
+            {pvar^.iPtr := nil;}
+            {pvar^.isForwardDeclared := false;}
+            pvar^.class := autosy;
+            pvar^.storage := parameter;
+            variable := pvar;
+            lastWasIdentifier := true;
+            newName := nil;
+            unnamedParm := true;
+            end; {if}
 
       end; {case}
 
@@ -1757,7 +1413,6 @@ var
       {handle function declarations}
       if token.kind = lparench then begin
 	 PushTable;			{create a symbol table}
-	 parameterCodeLoc := GetCodeLocation;
                                         {determine if it's a function}
          isFunction := lastWasIdentifier or isFunction;
          tPtr2 := pointer(GCalloc(sizeof(typeRecord))); {create the function type}
@@ -1776,9 +1431,30 @@ var
          ttPtr^.next := typeStack;
          typeStack := ttPtr;
          ttPtr^.typeDef := tPtr2;
-         NextToken;                     {skip the '(' token}
+         NextToken;                        {skip the '(' token}
+         isVoid := token.kind = voidsy;
+         if token.kind = typedef then
+            if token.symbolPtr^.itype^.kind = scalarType then
+               if token.symbolPtr^.itype^.baseType = cgVoid then
+                  isVoid := true;
+         if isVoid then begin              {check for a void prototype}
+            lSuppressMacroExpansions := suppressMacroExpansions;
+            suppressMacroExpansions := true;
+            NextToken;
+            suppressMacroExpansions := lSuppressMacroExpansions;
+            if token.kind = rparench then begin
+               PutBackToken(token, false, false);
+               NextToken;
+               tPtr2^.prototyped := true;
+               end
+            else begin
+               PutBackToken(token, false, false);
+               token.kind := voidsy;
+               token.class := reservedSymbol;
+               end; {else}
+            end; {if}
                                         {see if we are doing a prototyped list}
-         if token.kind in prototypeParameterDeclarationStart then begin
+         if token.kind in declarationSpecifiersElement then begin
             {handle a prototype variable list}
             numberOfParameters := 0;    {don't allow K&R parm declarations}
             done2 := false;
@@ -1786,7 +1462,7 @@ var
             with tPtr2^ do begin
                prototyped := true;      {it is prototyped}
                repeat                   {collect the declarations}
-                  if token.kind in prototypeParameterDeclarationStart then begin
+                  if token.kind in declarationSpecifiersElement then begin
                      ldeclaredTagOrEnumConst := declaredTagOrEnumConst;
                      lLastParameter := lastParameter;
                      DoDeclaration(true);
@@ -1794,27 +1470,17 @@ var
                      declaredTagOrEnumConst :=
                         ldeclaredTagOrEnumConst or declaredTagOrEnumConst;
                      if protoType <> nil then begin
-                        if (parameterList = nil)
-                           and StrictCompTypes(protoType, voidPtr)
-                           and ((protoVariable = nil)
-                              or (protoVariable^.name^ = '?'))
-                           and (token.kind = rparench) then
-                           {it is a (void) prototype: no parameters}
-                        else begin
-                           wp := pointer(Malloc(sizeof(parameterRecord)));
-                           wp^.next := parameterList;
-                           parameterList := wp;
-                           wp^.parameter := protoVariable;
-                           wp^.parameterType := protoType;
-                           if protoVariable <> nil then begin
-                              if not madeFunctionTable then begin
-                                 if not doingFunction then
-                                    protoVariable^.pln := GetLocalLabel;
-                                 protoVariable^.pnext := lastParameter;
-                                 lastParameter := protoVariable;
-                                 end; {if}
+                        wp := pointer(Malloc(sizeof(parameterRecord)));
+                        wp^.next := parameterList;
+                        parameterList := wp;
+                        wp^.parameter := protoVariable;
+                        wp^.parameterType := protoType;
+                        if protoVariable <> nil then begin
+                           if not madeFunctionTable then begin
+                              protoVariable^.pnext := lastParameter;
+                              lastParameter := protoVariable;
                               end; {if}
-                           end; {else}
+                           end; {if}
                         end; {if}
                      if token.kind = commach then begin
                         NextToken;
@@ -1848,9 +1514,7 @@ var
          else if token.kind = ident then begin
 
             {handle a K&R variable list}
-            if strictC23Prototypes then
-               Error(207)
-            else if (lint & lintNotPrototyped) <> 0 then
+            if (lint & lintNotPrototyped) <> 0 then
                Error(105);
             if doingFunction or doingPrototypes then
                Error(12)
@@ -1885,22 +1549,14 @@ var
                   done := true;
             until done or (token.kind = eofsy);
             end {else if}
-         else
-            if strictC23Prototypes then
-               tPtr2^.prototyped := true
-            else
-               if cStd < c23 then
-                  if (lint & lintNotPrototyped) <> 0 then
-                     Error(105);
+         else if (lint & lintNotPrototyped) <> 0 then
+            if not tPtr2^.prototyped then
+               Error(105);
          Match(rparench,12);            {insist on a closing ')' token}
-         parameterCodeLoc := RemoveCode(parameterCodeLoc);
          if madeFunctionTable or not lastWasIdentifier then
             PopTable
-         else begin
+         else
             madeFunctionTable := true;
-            parameterCode := parameterCodeLoc;
-            end; {else}
-         AttributeSpecifierSequence;
          end {if}
 
       {handle array declarations}
@@ -1912,26 +1568,24 @@ var
          {tPtr2^.qualifiers := [];}
          tPtr2^.kind := arrayType;
          {tPtr2^.elements := 0;}
-         {tPtr2^.isVariableLength := false;}
-         {tPtr2^.sizeLLN := 0;}
-         {tPtr2^.sizeTree := nil;}
-         {tPtr2^.aQualifiers := [];}
          NextToken;
          gotStatic := false;
          if doingParameters and (typeStack = nil) then begin
+            tPtr2^.kind := pointerType; {adjust to pointer type}
+            tPtr2^.size := cgPointerSize;
             if token.kind = staticsy then begin
                gotStatic := true;
                NextToken;
                end; {if}
             while token.kind in [constsy,volatilesy,restrictsy] do begin
                if token.kind = constsy then
-                  tPtr2^.aQualifiers := tPtr2^.aQualifiers + [tqConst]
+                  tPtr2^.qualifiers := tPtr2^.qualifiers + [tqConst]
                else if token.kind = volatilesy then begin
-                  tPtr2^.aQualifiers := tPtr2^.aQualifiers + [tqVolatile];
+                  tPtr2^.qualifiers := tPtr2^.qualifiers + [tqVolatile];
                   volatile := true;
                   end {else}
                else {if token.kind = restrictsy then}
-                  tPtr2^.aQualifiers := tPtr2^.aQualifiers + [tqRestrict];
+                  tPtr2^.qualifiers := tPtr2^.qualifiers + [tqRestrict];
                NextToken;
                end; {while}
             if not gotStatic then
@@ -1945,22 +1599,16 @@ var
          typeStack := ttPtr;
          ttPtr^.typeDef := tPtr2;
          if token.kind <> rbrackch then begin
-            if (token.kind = asteriskch) and (PeekToken = rbrackch) then begin
-               if doingPrototypes and not gotStatic then begin
-                  tPtr2^.isVariableLength := true;
-                  tPtr2^.size := 1; {dummy size for VLA}
-                  end {if}
-               else
-                  Error(200);
-               NextToken;
-               end {if}
-            else
-               ArrayLengthExpression(tPtr2);
+            Expression(arrayExpression, [rbrackch,semicolonch]);
+            if expressionValue <= 0 then begin
+               Error(45);
+               expressionValue := 1;
+               end; {if}
+            tPtr2^.elements := expressionValue;
             end {if}
          else if gotStatic then
             Error(35);
          Match(rbrackch,24);
-         AttributeSpecifierSequence;
          end; {else if}
       end; {while}
 
@@ -1971,7 +1619,6 @@ var
       tPtr2^.saveDisp := 0;
       tPtr2^.qualifiers := cpList^.qualifiers;
       tPtr2^.kind := pointerType;
-      tPtr2^.wasStarVLA := false;
       new(ttPtr);
       ttPtr^.next := typeStack;
       typeStack := ttPtr;
@@ -2012,8 +1659,8 @@ while typeStack <> nil do begin         {reverse the type stack}
             Error(103);
          end;
       arrayType: begin
+         tPtr2^.size := tPtr^.size * tPtr2^.elements;
          tPtr2^.aType := tPtr;
-         ComputeArraySize(tPtr2);
          end;
       otherwise: ;
       end; {case}
@@ -2023,26 +1670,16 @@ while typeStack <> nil do begin         {reverse the type stack}
 if pascalsy in declSpecifiers.declarationModifiers then
    tptr := MakePascalType(tptr);
 
-if doingParameters then                 {adjust array/fn parameters to pointers}
-   if tPtr^.kind = arrayType then begin
-      tPtr2 := MakePointerTo(tPtr^.aType);
-      tPtr2^.wasStarVLA := tPtr^.isVariableLength and (tPtr^.sizeLLN = 0);
-      tPtr := MakeQualifiedType(tPtr2, tPtr^.aQualifiers);
-      end {if}
-   else if tPtr^.kind = functionType then begin
-      tPtr := MakePointerTo(tPtr);
-      isFunction := false;
-      if madeFunctionTable then begin
-         PopTable;
-         madeFunctionTable := false;
-         end;
-      end; {else if}
+if doingParameters then                 {adjust array parameters to pointers}
+   if tPtr^.kind = arrayType then
+      tPtr := MakePointerTo(tPtr^.aType);
 
 if checkParms then begin                {check for parameter type conflicts}
    with variable^ do begin
       if doingParameters then begin
          if itype = nil then begin
             itype := tPtr;
+            numberOfParameters := numberOfParameters-1;
             if pfunc^.itype^.prototyped then begin
                pfunc^.itype^.overrideKR := true;
                p1 := nil;
@@ -2131,15 +1768,6 @@ if tPtr^.kind = functionType then begin {declare the identifier}
 1:    end; {if}
    state := declared;
    end; {if}
-
-if declSpecifiers.inferType then
-   if (tPtr^.kind <> scalarType)
-      or (token.kind <> eqch)
-      or (newName = nil)
-      or (variable <> nil)
-      then
-      AbortTypeInference(declSpecifiers);
-
 if madeFunctionTable then begin
    lTable := table;
    table := table^.next;
@@ -2178,40 +1806,22 @@ if variable <> nil then begin
          end; {if}
       variable^.isForwardDeclared := true;
       end; {if}
-   if declSpecifiers.inferType then
-      variable^.underspecified := true;
    end; {if}
 end; {Declarator}
 
 
-procedure GetInitializerExpression(isStatic: boolean);
-
-{ get the expression for an initializer                         }
-{                                                               }
-{ paramaters:                                                   }
-{       isStatic - is this for a static/global variable?        }
-
-begin {GetInitializerExpression}
-if not isStatic then
-   Expression(autoInitializerExpression, [commach,rparench,rbracech])
-else
-   Expression(initializerExpression, [commach,rparench,rbracech]);
-end; {GetInitializerExpression}
-
-
-procedure Initializer (var variable: identPtr; haveExpression: boolean);
+procedure Initializer (var variable: identPtr);
 
 { handle a variable initializer                                 }
 {                                                               }
 { paramaters:                                                   }
 {       variable - ptr to the identifier begin initialized      }
-{       haveExpression - has an expression been parsed but not  }
-{               used?                                           }
 
 var
    disp: longint;                       {disp within overall object being initialized}
    done: boolean;                       {for loop termination}
    errorFound: boolean;                 {used to remove bad initializations}
+   haveExpression: boolean;             {has an expression been parsed but not used?}
    iPtr,jPtr,kPtr: initializerPtr;      {for reversing the list}
    ip: identList;                       {used to place an id in the list}
    isStatic: boolean;                   {static storage duration (or automatic)?}
@@ -2235,6 +1845,18 @@ var
    disp := disp + size;
    end; {InsertInitializerRecord}
 
+
+   procedure GetInitializerExpression;
+   
+   { get the expression for an initializer                       }
+   
+   begin {GetInitializerExpression}
+   if not isStatic then
+      Expression(autoInitializerExpression, [commach,rparench,rbracech])
+   else
+      Expression(initializerExpression, [commach,rparench,rbracech]);
+   end; {GetInitializerExpression}
+   
 
    procedure GetInitializerValue (tp: typePtr; bitsize,bitdisp: integer);
  
@@ -2286,7 +1908,8 @@ var
          tree := tree^.left;
          if tree^.token.kind = plusch then begin
             rtree := tree^.right;
-            if rtree^.token.kind in [intconst,uintconst] then
+            if rtree^.token.kind in
+               [intconst,uintconst,ushortconst,charconst,scharconst,ucharconst] then
                size := rtree^.token.ival
             else if rtree^.token.kind in [longconst,ulongconst] then
                size := rtree^.token.lval
@@ -2370,7 +1993,7 @@ var
 
    begin {GetInitializerValue}
    if not haveExpression then
-      GetInitializerExpression(isStatic)
+      GetInitializerExpression
    else begin
       NextToken;
       haveExpression := false;
@@ -2419,7 +2042,6 @@ var
                         iPtr^.qVal.hi := 0;
                if tp^.cType = ctBool then
                   iPtr^.iVal := ord(expressionValue <> 0);
-               ExtendBitIntValue(iPtr^.qval, tp);
                goto 2;
                end; {if}
             if bKind in [cgReal,cgDouble,cgComp,cgExtended] then begin
@@ -2446,7 +2068,6 @@ var
                   CnvXULL(iPtr^.qVal, realExpressionValue)
                else
                   CnvXLL(iPtr^.qVal, realExpressionValue);
-               ExtendBitIntValue(iPtr^.qval, tp);
                goto 2;
                end;
             Error(47);
@@ -2463,11 +2084,8 @@ var
             end;
 
          pointerType:
-            if (etype = stringTypePtr)
-               or (etype = utf8StringTypePtr)
-               or (etype = utf16StringTypePtr)
-               or (etype = utf32StringTypePtr)
-               then begin
+            if (etype = stringTypePtr) or (etype = utf16StringTypePtr)
+               or (etype = utf32StringTypePtr) then begin
                iPtr^.isConstant := true;
                iPtr^.basetype := ccPointer;
                iPtr^.pval := 0;
@@ -2499,19 +2117,10 @@ var
                iPtr^.basetype := cgULong;
                iPtr^.pval := expressionValue;
                end {else if}
-            else if etype^.kind = nullptrType then begin
-               iPtr^.basetype := cgULong;
-               iPtr^.iVal := 0;
-               end {else if}
             else begin
                Error(48);
                errorFound := true;
                end; {else}
-
-         nullptrType: begin
-            iPtr^.basetype := cgULong;
-            iPtr^.iVal := 0;
-            end;
 
          structType,unionType,enumType: begin
             Error(46);
@@ -2526,8 +2135,7 @@ var
       end {if}
    else begin
       if ((tp^.kind = pointerType)
-         or ((tp^.kind = scalarType)
-            and ((tp^.baseType in [cgLong,cgULong]) or (tp^.cType = ctBool))))
+         or ((tp^.kind = scalarType) and (tp^.baseType in [cgLong,cgULong])))
          and (bitsize = 0)
          then begin
          iPtr^.basetype := ccPointer;
@@ -2542,11 +2150,12 @@ var
             operator := tree^.token.kind;
             while operator in [plusch,minusch] do begin
                with tree^.right^.token do
-                  if kind in [intConst,uintconst,longConst,ulongconst,
-                     longlongConst,ulonglongconst] then begin
-                     if kind = intConst then
+                  if kind in [intConst,uintconst,ushortconst,longConst,
+                     ulongconst,longlongConst,ulonglongconst,charconst,
+                     scharconst,ucharconst] then begin
+                     if kind in [intConst,charconst,scharconst,ucharconst] then
                         offSet2 := ival
-                     else if kind = uintConst then
+                     else if kind in [uintConst,ushortconst] then
                         offset2 := ival & $0000ffff
                      else if kind in [longConst,ulongconst] then begin
                         offset2 := lval;
@@ -2660,10 +2269,6 @@ var
                Error(47);
                errorFound := true;
                end; {else}
-            if tp^.cType = ctBool then begin
-               iPtr^.basetype := cgWord;
-               iPtr^.ival := 1;
-               end; {if}
             DisposeTree(initializerTree);
             goto 1;
             end; {if}
@@ -2709,7 +2314,6 @@ var
          tk^.right := nil;
          tk^.token.kind := intconst;
          tk^.token.class := intConstant;
-         tk^.token.itype := intPtr;
          tk^.token.ival := 0;
          iPtr^.iTree := tk;
          iPtr^.iType := charPtr;
@@ -2775,8 +2379,7 @@ var
       if tp^.aType^.kind = arrayType then
          RecomputeSizes(tp^.aType);
       with tp^ do
-         if not isVariableLength then
-            size := aType^.size*elements;
+         size := aType^.size*elements;
       end; {RecomputeSizes}
  
    begin {InitializeTerm}
@@ -2802,13 +2405,6 @@ var
       while ktp^.kind = definedType do
 	 ktp := ktp^.dType;
       kind := ktp^.kind;
-
-      if tp^.isVariableLength then begin
-         {In ORCA/C, initializable variables cannot have VLA types.}
-         {(This error will be reported elsewhere.)                 }
-         errorFound := true;
-         goto 1;
-         end; {if}
 
       {handle arrays initialized with a string constant}
       if (token.kind = stringConst) and (kind = scalarType) then begin
@@ -2891,7 +2487,7 @@ var
                      goto 1;
                      end; {if}
                   Match(lbrackch, 35);
-                  Expression(integerConstantExpression, [rbrackch]);
+                  Expression(arrayExpression, [rbrackch]);
                   if (expressionValue < 0)
                      or ((maxCount <> 0) and (expressionValue >= maxCount)) then
                      begin
@@ -2977,7 +2573,7 @@ var
             if not isStatic then
                if (token.kind in startExpression-[stringconst]) then begin
                   if not haveExpression then begin
-                     GetInitializerExpression(isStatic);
+                     GetInitializerExpression;
                      haveExpression := true;
                      PutBackToken(token, false, true);
                      token.kind := ident;  {dummy expression-starting token}
@@ -3056,7 +2652,9 @@ var
                   end; {else}
                end; {if}
 
-            if (ip = nil) or (ip^.itype^.size = 0) then
+            if ip = nil then
+               goto 2;
+            if ip^.itype^.size = 0 then
                goto 2;
             if ip^.isForwardDeclared then
                ResolveForwardReference(ip);
@@ -3086,8 +2684,12 @@ var
                while (ip <> nil) and ip^.anonMemberField do
                   ip := ip^.next;
                end; {else}
-            if ((ip = nil) or (ip^.itype^.size = 0)) and not braces then
-               goto 2;
+            if not braces then begin
+               if ip = nil then
+                  goto 2;
+               if ip^.itype^.size = 0 then
+                  goto 2;
+               end; {if}
             if token.kind = commach then begin
                NextToken;
                if token.kind = commach then
@@ -3117,18 +2719,8 @@ var
       end {else if}
 
    {handle single-valued types}
-   else if kind in [scalarType,pointerType,nullptrType,enumType] then begin
-      if braces then                    {handle empty initialization}
-         if token.kind = rbracech then
-            if (cStd >= c23) or not strictMode then begin
-               PutBackToken(token, false, true);
-               token.kind := intconst;
-               token.class := intConstant;
-               token.itype := intPtr;
-               token.ival := 0;
-               end; {if}
-      GetInitializerValue(tp, bitsize, bitdisp);
-      end {else if}
+   else if kind in [scalarType,pointerType,enumType] then
+      GetInitializerValue(tp, bitsize, bitdisp)
 
    else begin
       Error(47);
@@ -3153,13 +2745,7 @@ var
 begin {Initializer}
 disp := 0;                              {start at beginning of the object}
 errorFound := false;                    {no errors found so far}
-if haveExpression then begin
-   PutBackToken(token, false, true);
-   token.kind := ident;                 {dummy expression-starting token}
-   token.class := identifier;
-   token.name := @'__';
-   token.symbolPtr := nil;
-   end; {if}
+haveExpression := false;                {no expression parsed yet}
                                         {static or automatic initialization?}
 isStatic := variable^.storage in [external,global,private];
 luseGlobalPool := useGlobalPool;        {use global memory for global vars}
@@ -3200,17 +2786,13 @@ procedure DoStaticAssert;
 begin {DoStaticAssert}
 NextToken;
 Match(lparench, 13);
-Expression(integerConstantExpression, [commach]);
+Expression(arrayExpression, [commach]);
 if (expressionType = nil) or (expressionType^.kind <> scalarType) then
    Error(18)
 else if expressionValue = 0 then
    Error(132);
-if token.kind = commach then begin
-   NextToken;
-   Match(stringconst, 83);
-   end {if}
-else if (cStd < c23) and strictMode then
-   Error(86);
+Match(commach, 86);
+Match(stringconst, 83);
 Match(rparench, 12);
 Match(semicolonch, 22);
 end; {DoStaticAssert}
@@ -3233,10 +2815,13 @@ procedure DeclarationSpecifiers (var declSpecifiers: declSpecifiersRecord;
 {       declaredTagOrEnumConst - set if a tag or an enum const  }
 {               is declared (otherwise unchanged)               }
 
-label 2,3;
+label 1,2,3;
 
 var
+   done: boolean;                       {for loop termination}
+   enumVal: integer;                    {default value for the next enum constant}
    tPtr: typePtr;                       {for building types}
+   variable: identPtr;                  {enumeration variable}
  
    structPtr: identPtr;                 {structure identifier}
    structTypePtr: typePtr;              {structure type}
@@ -3248,7 +2833,6 @@ var
    
    typeSpecifiers: tokenSet;            {set of tokens specifying the type}
    typeDone: boolean;                   {no more type specifiers can be accepted}
-   inferType: boolean;                  {should type be inferred?}
    
    typeQualifiers: typeQualifierSet;    {set of type qualifiers found}
 
@@ -3258,11 +2842,6 @@ var
    myStorageClass: tokenEnum;           {storage class}
    
    isLongLong: boolean;                 {is this a "long long" type?}
-   bitIntWidth: integer;                {width of _BitInt type}
-   tHaveAttributeSpecifier: boolean;    {local copy of haveAttributeSpecifier}
-   
-   lCodeGeneration: boolean;            {local copy of codeGeneration}
-   typeofCode: codeRef;                 {code generated from typeof(expression)}
  
    procedure FieldList (tp: typePtr; kind: typeKind);
  
@@ -3316,8 +2895,6 @@ var
          tfl := tfl^.next;
          end; {while}
 1:    variable^.next := fl;
-      if IsVariablyModifiedType(variable^.itype) then
-         Error(201);
       if anonMember <> nil then begin
          variable^.anonMemberField := true;
          variable^.anonMember := anonMember;
@@ -3338,11 +2915,10 @@ var
    fl := nil;                           {nothing in the field list, yet}
                                         {while there are entries in the field list...}
 1: while token.kind in structDeclarationStart do begin
-      if token.kind in [_Static_assertsy,static_assertsy] then begin
+      if token.kind = _Static_assertsy then begin
          DoStaticAssert;
          goto 1;
          end; {if}
-      AttributeSpecifierSequence;
       DeclarationSpecifiers(fieldDeclSpecifiers, specifierQualifierListElement, 176);
       repeat                            {declare the variables...}
          if didFlexibleArray then
@@ -3380,7 +2956,7 @@ var
          if token.kind = colonch then   {handle a bit field}
             begin
             NextToken;
-            Expression(integerConstantExpression,[commach,semicolonch]);
+            Expression(arrayExpression,[commach,semicolonch]);
             if (expressionValue >= maxBitField) or (expressionValue < 0) then
                begin
                Error(54);
@@ -3409,7 +2985,8 @@ var
             if (tPtr^.kind <> scalarType)
                or not (tPtr^.baseType in
                   [cgByte,cgUByte,cgWord,cgUWord,cgLong,cgULong])
-               or (expressionValue > Width(tPtr)) then
+               or (expressionValue > tPtr^.size*8)
+               or ((expressionValue > 1) and (tPtr^.cType = ctBool)) then
                Error(115);
             if _Alignassy in fieldDeclSpecifiers.declarationModifiers then
                Error(142);
@@ -3505,359 +3082,6 @@ var
    end; {FieldList}
 
 
-   function EnumSpecifier: typePtr;
-   
-   { Handle an enum specifier                                   }
-   {                                                            }
-   { Returns the enum type                                      }
-
-   label 1;
-
-   type
-      enumConstListPtr = ^enumConstList;
-      enumConstList = record            {list of enum constants}
-         eConst: identPtr;
-         next: enumConstListPtr;
-         end;
-
-   var
-      done: boolean;                    {for loop termination}
-      variable: identPtr;               {enumeration variable}
-      ecPtr: typePtr;                   {enumeration constant type}
-      ttoken: tokenType;                {temp variable to save names}
-      enumVal: i65;                     {default value for the next enum constant}
-      enumConstType: typePtr;           {default type for the next enum constant}
-      enumTypeSpec: declSpecifiersRecord; {specifiers for enum underlying type}
-      haveEnumTypeSpec: boolean;        {is there an explicit enum type specifier?}
-      existingEnumConst: identPtr;      {existing enum const being redefined}
-      minVal,maxVal: i65;               {minimum and maximum enum const values}
-      underlyingType: typePtr;          {underlying integer type}
-      eType: typePtr;                   {enum type being declared or referenced}
-      ecList: enumConstListPtr;         {list of enum constants}
-      tList: enumConstListPtr;          {temp pointer}
-      originalECCount: longint;         {# of existing enum constants in type}
-      redefCount: longint;              {# of enum const redefinitions}
-      ldoingEnumerators: boolean;       {local copy of eType^.doingEnumerators}
-
-      function Eq65 (val1, val2: i65): boolean;
-
-      { Check if two 65-bit integers are equal                  }
-
-      begin {Eq65}
-      Eq65 := (val1.ll.lo = val2.ll.lo) and (val1.ll.hi = val2.ll.hi)
-         and (val1.sign = val2.sign);
-      end; {Eq65}
-
-
-      procedure Inc65 (var val: i65);
-      
-      { Increment a 65-bit integer                              }
-      
-      begin {Inc65}
-      val.ll.lo := val.ll.lo + 1;
-      if val.ll.lo = 0 then begin
-         val.ll.hi := val.ll.hi + 1;
-         if val.ll.hi = 0 then
-            val.sign := -ord(val.sign = 0);
-         end; {if}
-      end; {Inc65}
-
-
-      function SubrangeOfTypeRange (min, max: i65; tp: typePtr): boolean;
-
-      { Check if the range [min..max] is within the range of an }
-      { integer type.                                           }
-
-      begin {SubrangeOfTypeRange}
-      SubrangeOfTypeRange := InRangeOfType(min, tp) and InRangeOfType(max, tp);
-      end; {SubrangeOfTypeRange}
-
-
-   begin {EnumSpecifier}
-   NextToken;                           {skip the 'enum' token}
-   AttributeSpecifierSequence;
-   tHaveAttributeSpecifier := haveAttributeSpecifier;
-   ttoken := token;
-   if ttoken.kind in [ident,typedef] then
-      NextToken;
-                                        {check for enum type specifier}
-   haveEnumTypeSpec := false;
-   if (cStd >= c23) or not strictMode then
-      if token.kind = colonch then
-         if PeekToken in specifierQualifierListElement then
-            haveEnumTypeSpec := true;
-   eType := nil;
-   underlyingType := intPtr;
-                                        {handle a tagged enum type}
-   if ttoken.kind in [ident,typedef] then begin
-      variable := FindSymbol(ttoken, tagSpace,
-         (token.kind = lbracech) or haveEnumTypeSpec, true);
-      if variable <> nil then
-         if variable^.itype^.kind = enumType then begin
-            eType := variable^.itype;
-            underlyingType := eType^.underlyingType;
-            end; {if}
-                                        {handle an enum tag definition}
-      if (token.kind = lbracech) or haveEnumTypeSpec then begin
-         if eType <> nil then begin
-            if (cStd < c23) and strictMode and not looseTypeChecks then
-               Error(53)
-            else if haveEnumTypeSpec <> eType^.fixedUnderlyingType then
-               Error(213);
-            end;
-         end {if}
-                                        {handle reference to existing enum type}
-      else if eType <> nil then begin
-         if looseTypeChecks then
-            declaredTagOrEnumConst := true;
-         if not IsComplete(eType) then
-            Error(171);
-         if tHaveAttributeSpecifier then
-            Error(192);
-         goto 1;
-         end {if}
-      else begin
-         {ORCA/C extension: allow "enum ident" without prior declaration}
-         {to declare a complete enum type that is compatible with int   }
-         if not looseTypeChecks then
-            Error(171);
-         end; {else}
-      end; {if}
-                                        {create enum type and tag if needed}
-   if eType = nil then begin
-      eType := pointer(Malloc(sizeof(typeRecord)));
-      eType^.saveDisp := 0;
-      eType^.qualifiers := [];
-      eType^.kind := enumType;
-      eType^.ecCount := 0;
-      eType^.doingEnumerators := false;
-      eType^.size := 0;                 {will change later}
-      eType^.underlyingType := voidPtr; {will change later}
-      eType^.fixedUnderlyingType := haveEnumTypeSpec;
-      if ttoken.kind in [ident,typedef] then
-         variable := NewSymbol(ttoken.name, eType, ident, tagSpace, defined,
-            false);
-      end; {if}
-                                        {handle enum type specifier}
-   if haveEnumTypeSpec then begin
-      NextToken;
-      DeclarationSpecifiers(enumTypeSpec,
-         specifierQualifierListElement, 209);
-      if _Alignassy in enumTypeSpec.declarationModifiers then
-         Error(142);
-      enumTypeSpec.typeSpec := Unqualify(enumTypeSpec.typeSpec);
-      if (enumTypeSpec.typeSpec^.kind <> scalarType)
-         or not (enumTypeSpec.typeSpec^.cType in
-            [ctChar,ctSChar,ctUChar,ctShort,ctUShort,ctInt,ctUInt,ctLong,
-             ctULong,ctInt32,ctUInt32,ctBool,ctLongLong,ctULongLong])
-         or (enumsy in enumTypeSpec.declarationModifiers)
-         then begin
-         Error(210);
-         enumTypeSpec.typeSpec := intPtr;
-         end; {if}
-      underlyingType := enumTypeSpec.typeSpec;
-      if IsComplete(eType) then
-         if not StrictCompTypes(eType^.underlyingType, underlyingType) then
-            if eType^.fixedUnderlyingType then
-               Error(213);
-      eType^.underlyingType := underlyingType;
-      eType^.size := underlyingType^.size;
-      if not (token.kind in [lbracech,semicolonch]) then
-         Error(209)
-      else if token.kind = semicolonch then
-         if myDeclarationModifiers <> [] then
-            Error(211);
-      end; {if}
-                                        {handle enum constant definitions}
-   if token.kind = lbracech then begin
-      enumVal := i65_minus1;            {set the default value and type}
-      enumConstType := underlyingType;
-      ecList := nil;                    {no enum constants so far}
-      originalECCount := eType^.ecCount;
-      redefCount := 0;
-      minVal := i65_zero;               {initialize min/max values}
-      maxVal := i65_zero;
-      ldoingEnumerators := eType^.doingEnumerators;
-      eType^.doingEnumerators := true;
-      if ldoingEnumerators then         {check for nested enumerator lists}
-         Error(212);
-      NextToken;                        {skip the '{'}
-      repeat                            {declare the enum constants}
-         existingEnumConst := nil;
-         ttoken := token;
-         if token.kind in [ident,typedef] then begin
-                                        {identify existing enum const, if any}
-            if originalECCount <> 0 then begin
-               existingEnumConst := FindSymbol(token, variableSpace, true, true);
-               if existingEnumConst = nil then begin
-                  {ORCA/C extension: allow enum redeclarations to define new}
-                  {constants (must be in range of existing underlying type) }
-                  if not looseTypeChecks then
-                     Error(213);
-                  end {if}
-               else if existingEnumConst^.itype^.kind <> enumConst then
-                  existingEnumConst := nil
-               else if existingEnumConst^.itype^.containingEnum <> eType then
-                  existingEnumConst := nil
-               else begin               {check for duplicate enumerators}
-                  tList := ecList;
-                  done := false;
-                  while (tList <> nil) and not done do
-                     if tList^.eConst^.name = token.name then
-                        done := true
-                     else
-                        tList := tList^.next;
-                  if tList <> nil then
-                     Error(42)
-                  else begin
-                     new(tList);
-                     tList^.next := ecList;
-                     tList^.eConst := existingEnumConst;
-                     ecList := tList;
-                     redefCount := redefCount + 1;
-                     end; {if}
-                  end; {else}
-               end; {if}
-            NextToken;
-            end {if}
-         else
-            Error(9);
-         AttributeSpecifierSequence;
-                                        {handle explicit enumeration values}
-         if token.kind = eqch then begin
-            NextToken;
-            Expression(integerConstantExpression,[commach,rbracech]);
-            GetI65ExpressionValue(enumVal);
-            if existingEnumConst <> nil then begin
-               if not Eq65(enumVal, existingEnumConst^.itype^.eval) then
-                  Error(213);
-               end {if}
-            else if IsComplete(eType) then begin
-               if not InRangeOfType(enumVal, underlyingType) then
-                  Error(6);
-               end {else if}
-            else if InRangeOfType(enumVal, intPtr) then
-               enumConstType := intPtr
-            else begin
-               if (cStd < c23) and strictMode then
-                  Error(6);
-               enumConstType := expressionType;
-               end; {else}
-            end {if}
-         else begin                     {handle implicitly incremented values}
-            Inc65(enumVal);
-            if existingEnumConst <> nil then
-               if not Eq65(enumVal, existingEnumConst^.itype^.eval) then
-                  Error(213);
-            if not InRangeOfType(enumVal, enumConstType) then begin
-               if IsComplete(eType) then
-                  Error(6)
-               else if IsSignedType(enumConstType) then begin
-                  if (enumVal.sign = 0) and (enumVal.ll.hi < 0) then
-                     Error(6);
-                  enumConstType := longLongPtr;
-                  end {else if}
-               else begin
-                  if enumVal.sign < 0 then
-                     Error(6);
-                  enumConstType := uLongLongPtr;
-                  end; {else}
-               end;
-            end; {if}
-                                        {set the enumeration constant value}
-         if existingEnumConst = nil then
-            if ttoken.kind in [ident,typedef] then begin
-               ecPtr := pointer(Malloc(sizeof(typeRecord)));
-               ecPtr^.saveDisp := 0;
-               ecPtr^.qualifiers := [];
-               ecPtr^.kind := enumConst;
-               ecPtr^.eval := enumVal;
-               ecPtr^.ecType := enumConstType;
-               ecPtr^.size := enumConstType^.size;
-               ecPtr^.containingEnum := eType;
-               if eType^.saveDisp <> 0 then
-                  TermHeader;
-               eType^.ecCount := eType^.ecCount + 1;
-               variable := NewSymbol(ttoken.name, ecPtr, ident, variableSpace,
-                  defined, false);
-               new(tList);
-               tList^.next := ecList;
-               tList^.eConst := variable;
-               ecList := tList;
-               end; {if}
-                                        {update min/max values}
-         if Ge65(enumVal, maxVal) then
-            maxVal := enumVal
-         else if Le65(enumVal, minVal) then
-            minVal := enumVal;
-                                        {next enumeration constant}
-         if token.kind = commach then begin
-            NextToken;
-            done := token.kind = rbracech;
-            end {if}
-         else
-            done := true;
-      until done or (token.kind = eofsy);
-      eType^.doingEnumerators := ldoingEnumerators;
-
-      {ORCA/C extension: do not require all enum constants to be}
-      {redefined in an enum redeclaration.                      }
-      if not looseTypeChecks then
-         if originalECCount <> 0 then
-            if redefCount <> originalECCount then
-               Error(213);
-                                        {compute final underlying type}
-      if not IsComplete(eType) then begin
-         if SubrangeOfTypeRange(minVal, maxVal, intPtr) then
-            underlyingType := intPtr
-         else if SubrangeOfTypeRange(minVal, maxVal, uIntPtr) then
-            underlyingType := uIntPtr
-         else if SubrangeOfTypeRange(minVal, maxVal, longPtr) then
-            underlyingType := longPtr
-         else if SubrangeOfTypeRange(minVal, maxVal, uLongPtr) then
-            underlyingType := uLongPtr
-         else if SubrangeOfTypeRange(minVal, maxVal, longLongPtr) then
-            underlyingType := longLongPtr
-         else if SubrangeOfTypeRange(minVal, maxVal, uLongLongPtr) then
-            underlyingType := uLongLongPtr
-         else
-            Error(6);
-         eType^.underlyingType := underlyingType;
-         eType^.size := underlyingType^.size;
-         tList := ecList;               {update types of enum constants}
-         while tList <> nil do begin
-            tList^.eConst^.iType^.ecType := underlyingType;
-            tList^.eConst^.iType^.size := underlyingType^.size;
-            tList := tList^.next;
-            end; {while}
-         end; {if}
-      while ecList <> nil do begin      {dispose ecList}
-         tList := ecList;
-         ecList := tList^.next;
-         dispose(tList);
-         end; {while}
-      if token.kind = rbracech then
-         NextToken
-      else begin
-         Error(23);
-         SkipStatement;
-         end; {else}
-      end {if}
-   else begin                           {handle enum with no enumerator list}
-      if not (ttoken.kind in [ident,typedef]) then
-         Error(27);
-      if eType^.size = 0 then begin
-         eType^.underlyingType := underlyingType;
-         eType^.size := underlyingType^.size;
-         end; {if}
-      if tHaveAttributeSpecifier then
-         Error(192);
-      end; {else}
-   declaredTagOrEnumConst := true;      {either true, or error already reported}
-1: EnumSpecifier := underlyingType;
-   end; {EnumSpecifier}
-
-
    procedure ResolveType;
 
    { Resolve a set of type specifier keywords to a type         }
@@ -3920,67 +3144,12 @@ var
       myTypeSpec := extendedPtr
    else if typeSpecifiers = [compsy] then
       myTypeSpec := compPtr
-   else if (typeSpecifiers = [_Boolsy])
-      or (typeSpecifiers = [boolsy]) then begin
+   else if typeSpecifiers = [_Boolsy] then begin
       myTypeSpec := boolPtr;
-      end {else if}
-   else if (typeSpecifiers = [_BitIntsy])
-      or (typeSpecifiers = [signedsy,_BitIntsy]) then
-      {OK - myTypeSpec will be set elsewhere}
-   else if typeSpecifiers = [unsignedsy,_BitIntsy] then begin
-      if bitIntWidth <> 0 then
-         myTypeSpec := GetBitIntType(true, bitIntWidth)
-      else
-         {OK - myTypeSpec will be set elsewhere}
       end {else if}
    else
       Error(badNextTokenError);
    end; {ResolveType}
-
-
-   procedure DoStorageClass(storageClass: tokenEnum);
-   
-   begin {DoStorageClass}
-   if myStorageClass <> ident then begin
-      if typeDone or (typeSpecifiers <> []) then
-         Error(badNextTokenError)
-      else
-         Error(26);
-      end; {if}
-   myStorageClass := storageClass;
-   if not doingFunction then
-      if storageClass = autosy then
-         Error(62);
-   if doingParameters then begin
-      if storageClass <> registersy then
-         Error(87);
-      end {if}
-   else if myStorageClass in [staticsy,typedefsy] then begin
-      {Error if we may have allocated type info in local pool.}
-      {This should not come up with current use of MM pools.  }
-      if not useGlobalPool then
-         if typeDone then
-            Error(57);
-      useGlobalPool := true;
-      end; {else if}
-   if doingForLoopClause1 then
-      if (cStd < c23) and strictMode then
-         if not (myStorageClass in [autosy,registersy]) then
-            Error(127);
-   if _Thread_localsy in myDeclarationModifiers then
-      if not (myStorageClass in [staticsy,externsy]) then
-         Error(177);
-   end; {DoStorageClass}
-
-
-   procedure GotTypeSpecifier;
-   
-   begin {GotTypeSpecifier}
-   if inferType then begin
-      inferType := false;
-      DoStorageClass(autosy);
-      end; {if}
-   end; {GotTypeSpecifier}
 
 
 begin {DeclarationSpecifiers}
@@ -3992,26 +3161,44 @@ typeQualifiers := [];
 typeSpecifiers := [];
 typeDone := false;
 isLongLong := false;
-bitIntWidth := 0;
-inferType := false;
 while token.kind in allowedTokens do begin
    case token.kind of
       {storage class specifiers}
       autosy,externsy,registersy,staticsy,typedefsy: begin
          myDeclarationModifiers := myDeclarationModifiers + [token.kind];
-         if (cStd >= c23)
-            and (token.kind = autosy)
-            and (not typeDone) and (typeSpecifiers = [])
-            and not doingParameters
-            then
-            inferType := true           {auto possibly used for type inference}
-         else
-            DoStorageClass(token.kind);
+         if myStorageClass <> ident then begin
+            if typeDone or (typeSpecifiers <> []) then
+               Error(badNextTokenError)
+            else
+               Error(26);
+            end; {if}
+         myStorageClass := token.kind;
+         if not doingFunction then
+            if token.kind = autosy then
+               Error(62);
+         if doingParameters then begin
+            if token.kind <> registersy then
+               Error(87);
+            end {if}
+         else if myStorageClass in [staticsy,typedefsy] then begin
+            {Error if we may have allocated type info in local pool.}
+            {This should not come up with current use of MM pools.  }
+            if not useGlobalPool then
+               if typeDone then
+                  Error(57);
+            useGlobalPool := true;
+            end; {else if}
+         if doingForLoopClause1 then
+            if not (myStorageClass in [autosy,registersy]) then
+               Error(127);
+         if _Thread_localsy in myDeclarationModifiers then
+            if not (myStorageClass in [staticsy,externsy]) then
+               Error(177);
          NextToken;
          end;
 
-      _Thread_localsy,thread_localsy: begin
-         myDeclarationModifiers := myDeclarationModifiers + [_Thread_localsy];
+      _Thread_localsy: begin
+         myDeclarationModifiers := myDeclarationModifiers + [token.kind];
          if doingParameters then
             Error(87);
          if not (myStorageClass in [ident,staticsy,externsy]) then
@@ -4055,7 +3242,6 @@ while token.kind in allowedTokens do begin
          NextToken;
          if token.kind = lparench then begin
             {_Atomic(typename) as type specifier}
-            GotTypeSpecifier;
             if typeDone or (typeSpecifiers <> []) then
                Error(badNextTokenError);
             NextToken;
@@ -4067,8 +3253,7 @@ while token.kind in allowedTokens do begin
 
       {type specifiers}
       unsignedsy,signedsy,intsy,longsy,charsy,shortsy,floatsy,doublesy,voidsy,
-      compsy,extendedsy,_Boolsy,boolsy,_BitIntsy: begin
-         GotTypeSpecifier;
+      compsy,extendedsy,_Boolsy: begin
          if typeDone then
             Error(badNextTokenError)
          else if token.kind in typeSpecifiers then begin
@@ -4088,54 +3273,108 @@ while token.kind in allowedTokens do begin
             typeSpecifiers := typeSpecifiers + [token.kind];
             ResolveType;
             end; {else}
-         if token.kind = _BitIntsy then begin
-            NextToken;
-            Match(lparench, 13);
-            Expression(integerConstantExpression,[rparench]);
-            if (expressionValue < 1) or (expressionValue > 64) then begin
-               Error(208);
-               bitIntWidth := 16;
-               end {if}
-            else
-               bitIntWidth := ord(expressionValue);
-            Match(rparench, 12);
-            myTypeSpec :=
-               GetBitIntType(unsignedsy in typeSpecifiers, bitIntWidth);
-            end {if}
-         else
-            NextToken;
+         NextToken;
          end;
 
       _Complexsy,_Imaginarysy: begin
          Error(136);
-         GotTypeSpecifier;
-         NextToken;
-         end;
-
-      _Decimal32sy,_Decimal64sy,_Decimal128sy: begin
-         Error(190);
-         GotTypeSpecifier;
-         if not typeDone then begin
-            myTypeSpec := doublePtr;
-            typeDone := true;
-            end; {if}
          NextToken;
          end;
 
       enumsy: begin                     {enum}
-         GotTypeSpecifier;
          if typeDone or (typeSpecifiers <> []) then
             Error(badNextTokenError)
          else if restrictsy in myDeclarationModifiers then
             Error(143);
-         myTypeSpec := EnumSpecifier;
-         myDeclarationModifiers := myDeclarationModifiers + [enumsy];
+         NextToken;                     {skip the 'enum' token}
+         if token.kind in [ident,typedef] then begin {handle a type definition}
+            ttoken := token;
+            NextToken;
+            variable :=
+               FindSymbol(ttoken, tagSpace, token.kind = lbracech, true);
+            if token.kind = lbracech then begin
+               if (variable <> nil) and (variable^.itype^.kind = enumType) then
+                  if not looseTypeChecks then
+                     Error(53);
+               end {if}
+            else
+               if (variable <> nil) and (variable^.itype^.kind = enumType) then
+                  begin
+                  if looseTypeChecks then
+                     declaredTagOrEnumConst := true;
+                  goto 1;
+                  end {if}
+               else begin
+                  declaredTagOrEnumConst := true;
+                  if not looseTypeChecks then
+                     Error(171);
+                  end; {else}
+            tPtr := pointer(Malloc(sizeof(typeRecord)));
+            tPtr^.size := cgWordSize;
+            tPtr^.saveDisp := 0;
+            tPtr^.qualifiers := [];
+            tPtr^.kind := enumType;
+            variable :=
+               NewSymbol(ttoken.name, tPtr, ident, tagSpace, defined, false);
+            end {if}
+         else if token.kind <> lbracech then
+            Error(9);
+         enumVal := 0;                  {set the default value}
+         if token.kind = lbracech then begin
+            declaredTagOrEnumConst := true;
+            NextToken;                  {skip the '{'}
+            repeat                      {declare the enum constants}
+               ttoken := token;
+               if ttoken.kind in [ident,typedef] then
+                  NextToken
+               else
+                  Error(9);
+               if token.kind = eqch then begin {handle explicit enumeration values}
+                  NextToken;
+                  Expression(arrayExpression,[commach,rbracech]);
+                  enumVal := long(expressionValue).lsw;
+                  if enumVal <> expressionValue then
+                     Error(6)
+                  else if enumVal < 0 then
+                     if expressionType^.kind = scalarType then
+                        if expressionType^.baseType in [cgULong,cgUQuad] then
+                           Error(6);
+                  end; {if}
+               if ttoken.kind in [ident,typedef] then begin
+                  tPtr := pointer(Malloc(sizeof(typeRecord)));
+                  tPtr^.size := cgWordSize;
+                  tPtr^.saveDisp := 0;
+                  tPtr^.qualifiers := [];
+                  tPtr^.kind := enumConst;
+                  tPtr^.eval := enumVal;   {set the enumeration constant value}
+                  variable := NewSymbol(ttoken.name, tPtr, ident, variableSpace,
+                     defined, false);
+                  end; {if}
+               enumVal := enumVal+1;    {inc the default enumeration value}
+               if token.kind = commach then {next enumeration...}
+                  begin
+                  done := false;
+                  NextToken;
+                  {kws -- allow trailing , in enum }
+                  { C99 6.7.2.2 Enumeration specifiers }
+                  if token.kind = rbracech then done := true;
+                  end {if}
+               else
+                  done := true;
+            until done or (token.kind = eofsy);
+            if token.kind = rbracech then
+               NextToken
+            else begin
+               Error(23);
+               SkipStatement;
+               end; {else}
+            end; {if}
+1:       myTypeSpec := intPtr;
          typeDone := true;
          end;
   
       structsy,                         {struct}
       unionsy: begin                    {union}
-         GotTypeSpecifier;
          if typeDone or (typeSpecifiers <> []) then
             Error(badNextTokenError)
          else if restrictsy in myDeclarationModifiers then
@@ -4148,8 +3387,6 @@ while token.kind in allowedTokens do begin
          structPtr := nil;              {no record, yet}
          structTypePtr := defaultStruct; {use int as a default type}
          NextToken;                     {skip 'struct' or 'union'}
-         AttributeSpecifierSequence;
-         tHaveAttributeSpecifier := haveAttributeSpecifier;
          if token.kind in [ident,typedef] {if there is a struct name then...}
             then begin
                                         {look up the name}
@@ -4231,10 +3468,7 @@ while token.kind in allowedTokens do begin
                Error(23);
                SkipStatement;
                end; {else}
-            end {if}
-         else if token.kind <> semicolonch then
-            if tHaveAttributeSpecifier then
-               Error(192);
+            end; {if}
          if globalStruct then
             useGlobalPool := lUseGlobalPool;
          myTypeSpec := structTypePtr;
@@ -4244,37 +3478,9 @@ while token.kind in allowedTokens do begin
             myDeclarationModifiers := myDeclarationModifiers + [unionsy];
          typeDone := true;
          end;
-
-      typeofsy,                         {typeof}
-      typeof_unqualsy: begin            {typeof_unqual}
-         ttoken := token;
-         GotTypeSpecifier;
-         NextToken;
-         Match(lparench, 13);
-         if token.kind in specifierQualifierListElement then
-            myTypeSpec := TypeName
-         else begin
-            typeofCode := GetCodeLocation;
-            Expression(normalExpression, [rparench]);
-            {TODO error on bitfield}
-            myTypeSpec := GetFullExpressionType;
-            if not IsVariablyModifiedType(myTypeSpec) then
-               typeofCode := RemoveCode(typeofCode)
-            else begin
-               Gen0t(pc_pop, UsualUnaryConversions);
-               if codeGeneration then
-                  vlaTrees := vlaTrees + 1;
-               end; {else}
-            end; {else}
-         if ttoken.kind = typeof_unqualsy then
-            myTypeSpec := Unqualify(myTypeSpec);
-         typeDone := true;
-         Match(rparench, 12);
-         end;
-
+ 
       typedef: begin                    {named type definition}
          if (typeSpecifiers = []) and not typeDone then begin
-            GotTypeSpecifier;
             myTypeSpec := token.symbolPtr^.itype;
             if restrictsy in myDeclarationModifiers then
                if (myTypeSpec^.kind <> pointerType)
@@ -4288,22 +3494,18 @@ while token.kind in allowedTokens do begin
          end;
 
       {alignment specifier}
-      _Alignassy,alignassy: begin
-         myDeclarationModifiers := myDeclarationModifiers + [_Alignassy];
+      _Alignassy: begin
+         myDeclarationModifiers := myDeclarationModifiers + [token.kind];
          NextToken;
          Match(lparench, 13);
          if token.kind in specifierQualifierListElement then begin
-            lCodeGeneration := codeGeneration;
-            codeGeneration := false;
             tPtr := TypeName;
-            codeGeneration := lCodeGeneration and (numErrors = 0);
             with tPtr^ do
-               if (size = 0) or
-                  ((kind = arrayType) and not isVariableLength and (elements = 0)) then
+               if (size = 0) or ((kind = arrayType) and (elements = 0)) then
                   Error(133);
             end {if}
          else begin
-            Expression(integerConstantExpression, [rparench]);
+            Expression(arrayExpression, [rparench]);
             if (expressionValue <> 0) and (expressionValue <> 1) then
                Error(138);
             end;
@@ -4325,18 +3527,12 @@ if _Thread_localsy in myDeclarationModifiers then
          Error(177);
 if myTypeSpec = nil then begin
    myTypeSpec := intPtr;                {under C89, default type is int}
-   if not inferType then
-      if (lint & lintC99Syntax) <> 0 then
-         Error(151);
+   if (lint & lintC99Syntax) <> 0 then
+      Error(151);
    end; {if}
-if bitIntWidth = 1 then
-   if myTypeSpec^.cType = ctBitInt then
-      Error(208);
-declSpecifiers.inferType := inferType;
 declSpecifiers.typeSpec :=              {apply type qualifiers}
    MakeQualifiedType(myTypeSpec, typeQualifiers);
 declSpecifiers.storageClass := myStorageClass;
-AttributeSpecifierSequence;
 end; {DeclarationSpecifiers}
 
 
@@ -4361,7 +3557,6 @@ var
    isNoreturn: boolean;                 {has the _Noreturn specifier been used?}
    alignmentSpecified: boolean;         {was an alignment explicitly specified?}
    lDoingParameters: boolean;           {local copy of doingParameters}
-   lHaveAttributeSpecifier: boolean;    {local copy of haveAttributeSpecifier}
    lInhibitHeader: boolean;             {local copy of inhibitHeader}
    lp,tlp,tlp2: identPtr;               {for tracing parameter list}
    lUseGlobalPool: boolean;             {local copy of useGlobalPool}
@@ -4373,8 +3568,6 @@ var
    tp: typePtr;                         {for tracing type lists}
    startLine: longint;                  {line where this declaration starts}
    declSpecifiers: declSpecifiersRecord; {type & specifiers for the declaration}
-   parsedInitializer: boolean;          {parsed initializer expression?}
-   paramCode: codeRef;                  {code generated by function parameters}
 
 
    procedure CheckArray (v: identPtr; firstVariable: boolean);
@@ -4394,17 +3587,11 @@ var
    begin {CheckArray}
    if v <> nil then begin               {skip check if there's no variable}
       tp := v^.itype;                   {initialize the type pointer}
-      if tp^.kind = arrayType then      {variables of VLA type are not allowed}
-         if tp^.isVariableLength then begin
-            Error(199);
-            goto 1;
-            end; {if}
       while tp <> nil do begin          {check all types}
-         if tp^.kind = arrayType then   {if it's an array with an unspecified }
-            begin                       { size and an unspecified size is not }
-                                        { allowed here, flag an error.        }
-            if (tp^.elements = 0) and not tp^.isVariableLength then 
-               if not firstVariable then 
+         if tp^.kind = arrayType then   {if it's an array with an unspecified  }
+            begin
+            if tp^.elements = 0 then    { size and an unspecified size is not  }
+               if not firstVariable then { allowed here, flag an error.         }
                   begin
                   Error(49);
                   goto 1;
@@ -4578,17 +3765,7 @@ var
 begin {DoDeclaration}
 lInhibitHeader:= inhibitHeader;
 inhibitHeader := true;			{block imbedded includes in headers}
-AttributeSpecifierSequence;
-lHaveAttributeSpecifier := haveAttributeSpecifier;
-if lHaveAttributeSpecifier then         {handle attribute declaration}
-   if token.kind = semicolonch then
-      if not doingPrototypes then begin
-         NextToken;
-         goto 4;
-         end; {if}
-if token.kind in [_Static_assertsy,static_assertsy] then begin
-   if lHaveAttributeSpecifier then
-      Error(192);
+if token.kind = _Static_assertsy then begin
    DoStaticAssert;
    goto 4;
    end; {if}
@@ -4613,7 +3790,7 @@ isNoreturn := _Noreturnsy in declSpecifiers.declarationModifiers;
 alignmentSpecified := _Alignassy in declSpecifiers.declarationModifiers;
 if token.kind = semicolonch then
    if not doingPrototypes then
-      if not declaredTagOrEnumConst or lHaveAttributeSpecifier then
+      if not declaredTagOrEnumConst then
          Error(176);
 
 3:
@@ -4648,10 +3825,6 @@ if isFunction then begin
    if doingParameters then              {a function cannot be a parameter}
       Error(28);
    fnType := variable^.itype;           {get the type of the function}
-   if doingFunction then
-      if declSpecifiers.storageClass <> typedefsy then
-         if IsVariablyModifiedType(fnType) then
-            Error(201);
    while (fnType <> nil) and (fnType^.kind <> functionType) do
       case fnType^.kind of
          arrayType  : fnType := fnType^.aType;
@@ -4682,7 +3855,9 @@ if isFunction then begin
          with fnType^ do begin
             NextToken;
             Match(lparench,13);
-            if token.kind in [intconst,uintconst] then begin
+            if token.kind in
+               [intconst,uintconst,ushortconst,charconst,scharconst,ucharconst]
+               then begin
                toolNum := token.ival;
                NextToken;
                end {if}
@@ -4693,7 +3868,9 @@ if isFunction then begin
                dispatcher := token.lval;
                NextToken;
                end {if}
-            else if token.kind in [intconst,uintconst] then begin
+            else if token.kind in
+               [intconst,uintconst,ushortconst,charconst,scharconst,ucharconst]
+               then begin
                dispatcher := token.ival;
                NextToken;
                end {if}
@@ -4742,27 +3919,19 @@ if isFunction then begin
       doingParameters := true;
                                         {declare the parameters}
       lp := lastParameter;              {(save now; it's volatile)}
-      if token.kind = lbracech then
-         paramCode := parameterCode
-      else begin
-         paramCode := GetCodeLocation;
-         while not (token.kind in [lbracech,eofsy]) do
-            if token.kind in declarationSpecifiersElement then
-               DoDeclaration(false)
-            else begin
-               Error(27);
-               NextToken;
-               end; {else}
-         paramCode := RemoveCode(paramCode);
-         end; {else}
-      if cStd >= c23 then               {empty param list is a prototype in C23}
-         if fnType^.parameterList = nil then
-            fnType^.prototyped := true;
-      if not fnType^.prototyped or fnType^.overrideKR then begin
+      while not (token.kind in [lbracech,eofsy]) do
+         if token.kind in declarationSpecifiersElement then
+            DoDeclaration(false)
+         else begin
+            Error(27);
+            NextToken;
+            end; {else}
+      if numberOfParameters <> 0 then   {default K&R parm type is int}
+         begin
          tlp := lp;
          while tlp <> nil do begin
             if tlp^.itype = nil then begin
-               tlp^.itype := intPtr;    {default K&R parm type is int}
+               tlp^.itype := intPtr;
                tlp^.pln := GetLocalLabel;
                if (lint & lintC99Syntax) <> 0 then
                   if (lint & lintNotPrototyped) = 0 then
@@ -4773,21 +3942,6 @@ if isFunction then begin
          end; {if}
       tlp := lp;			{make sure all parameters have an}
       while tlp <> nil do begin		{ identifier and a complete type }
-         tp := tlp^.itype;
-         if (tp^.kind = pointerType) and tp^.wasStarVLA then
-            Error(200)
-         else
-            while tp^.kind in [arrayType,pointerType,functionType,definedType]
-               do begin
-               if (tp^.kind = arrayType)
-                  and tp^.isVariableLength
-                  and (tp^.sizeLLN = 0) then begin
-                  Error(200);
-                  tp := intPtr;
-                  end {if}
-               else
-                  tp := tp^.aType;
-               end; {while}
          if tlp^.name^ = '?' then begin
             Error(113);
             tlp := nil;
@@ -4810,7 +3964,11 @@ if isFunction then begin
       if progress then                  {write progress information}
          writeln('Compiling ', fName^);
       useGlobalPool := false;           {start a local label pool}
-      EnableCodeGen;                    {init the code generator (if it needs it)}
+      if not codegenStarted and (liDCBGS.kFlag <> 0) then begin {init the code generator (if it needs it)}
+         CodeGenInit (outFileGS, liDCBGS.kFlag, doingPartial);
+         liDCBGS.kFlag := 3;
+         codegenStarted := true;
+         end; {if}
       foundFunction := true;            {got one...}
       segType := ord(variable^.class = staticsy) * $4000;
       if (variable^.storage = external) and variable^.inlineDefinition then begin
@@ -4833,6 +3991,7 @@ if isFunction then begin
       if not isAsm then
          Gen1Name(pc_ent, 0, variable^.name);
       functionName := variable^.name;
+      nextLocalLabel := 1;              {initialize GetLocalLabel}
       returnLabel := GenLabel;          {set up an exit point}
       tempList := nil;                  {initialize the work label list}
       if not isAsm then                 {generate traceback, profile code}
@@ -4896,7 +4055,6 @@ if isFunction then begin
             GenParameters(fnType^.parameterList); 
          savedVolatile := volatile;
          functionTable := table;
-         InsertCode(paramCode);
          if fnType^.varargs then begin  {make internal va info for varargs funcs}
             lp := NewSymbol(@'__orcac_va_info', vaInfoPtr, autosy,
                variableSpace, declared, false);
@@ -4918,7 +4076,6 @@ if isFunction then begin
 
 {handle a variable declaration}
 else {if not isFunction then} begin
-   tp := variable^.itype;
    if not declarationSpecifierFound then
       if first then
          Error(26);
@@ -4929,10 +4086,6 @@ else {if not isFunction then} begin
       Error(119);
    if isNoreturn then
       Error(141);
-   if ((tp^.kind = functionType) and (declSpecifiers.storageClass <> typedefsy))
-      or (declSpecifiers.storageClass = externsy)  then
-      if IsVariablyModifiedType(tp) then
-         Error(201);
    if token.kind = eqch then begin
       if declSpecifiers.storageClass = typedefsy then
          Error(52)
@@ -4942,38 +4095,15 @@ else {if not isFunction then} begin
       if doingPrototypes or doingParameters then
          Error(88);
                                         {allocate copy of incomplete array type,}
-                                        {so it can be completed by Initializer}
-      if (tp^.kind = arrayType)
-         and not tp^.isVariableLength
-         and (tp^.elements = 0) then begin
+      tp := variable^.itype;            {so it can be completed by Initializer}
+      if (tp^.kind = arrayType) and (tp^.elements = 0) then begin
          variable^.itype := pointer(Malloc(sizeof(typeRecord)));
          variable^.itype^ := tp^;
          variable^.itype^.saveDisp := 0;
          end;
       TermHeader;                       {make sure the header file is closed}
       NextToken;                        {handle an initializer}
-      parsedInitializer := false;
-      if declSpecifiers.inferType then begin
-         if token.kind in startExpression then begin
-            GetInitializerExpression(
-               variable^.storage in [external,global,private]);
-            parsedInitializer := true;
-            if token.kind = semicolonch then begin
-                                        {infer type of variable}
-               tp := expressionType;
-               ValueExpressionConversions;
-               variable^.itype := MakeQualifiedType(
-                  expressionType, variable^.itype^.qualifiers);
-               expressionType := tp;
-               end {if}
-            else
-               AbortTypeInference(declSpecifiers);
-            end {if}
-         else
-            AbortTypeInference(declSpecifiers);
-         variable^.underspecified := false;
-         end; {if}
-      Initializer(variable, parsedInitializer);
+      Initializer(variable);
       end; {if}
                                         {check to insure array sizes are specified}
    if declSpecifiers.storageClass <> typedefsy then
@@ -4986,10 +4116,7 @@ else {if not isFunction then} begin
       Gen2(dc_loc, variable^.lln, long(variable^.itype^.size).lsw);
       if variable^.state = initialized then
          AutoInit(variable, startLine, false); {initialize auto variable}
-      end {if}
-   else if variable^.storage = parameter then
-      if not doingPrototypes then
-         variable^.pln := GetLocalLabel;
+      end; {if}
    if (token.kind = commach) and (not doingPrototypes) then begin
       NextToken;                        {allow multiple variables on one line}
       first := false;
@@ -5046,50 +4173,60 @@ var
       {                                                         }
       { nonempty-abstract-declarator:                           }
       {    ( nonempty-abstract-declarator )                     }
-      {    abstract-declarator ( parameter-type-list OPT )      }
+      {    abstract-declarator ( )                              }
       {    abstract-declarator [ expression OPT ]               }
       {    * abstract-declarator                                }
 
       var
+         pcount: integer;               {paren counter}
          tp: typePtr;                   {work pointer}
-         nextKind: tokenEnum;           {lookahead token kind}
-         done: boolean;                 {for loop termination}
-         wp: parameterPtr;              {used to build prototype var list}
 
       begin {NonEmptyAbstractDeclarator}
       if token.kind = lparench then begin
          NextToken;
-         if token.kind = lbrackch then begin
-            {check for a function parameter starting with an attribute}
+         if token.kind = rparench then begin
+
+            {create a function type}
+            tp := pointer(Calloc(sizeof(typeRecord)));
+            {tp^.size := 0;}
+            {tp^.saveDisp := 0;}
+            {tp^.qualifiers := [];}
+            tp^.kind := functionType;
+            {tp^.varargs := false;}
+            {tp^.prototyped := false;}
+            {tp^.overrideKR := false;}
+            {tp^.parameterList := nil;}
+            {tp^.isPascal := false;}
+            {tp^.toolNum := 0;}
+            {tp^.dispatcher := 0;}
+            tp^.fType := Unqualify(tl);
+            tl := tp;
             NextToken;
-            nextKind := token.kind;
-            PutBackToken(token, false, true);
-            token.kind := lbrackch;
-            token.class := reservedSymbol;
-            end; {if}
-         if (token.kind in [lparench,asteriskch])
-            or ((token.kind = lbrackch) and (nextKind <> lbrackch)) then begin
-            NonEmptyAbstractDeclarator;
-            Match(rparench,12);
             end {if}
          else begin
-            {this must be a function abstract declarator (handled below)}
-            PutBackToken(token, false, true);
-            token.kind := lparench;
-            token.class := reservedSymbol;
+
+            {handle a parenthesized type}
+            if not (token.kind in [lparench,asteriskch,lbrackch]) then
+               begin
+               Error(82);
+               while not (token.kind in
+                  [eofsy,lparench,asteriskch,lbrackch,rparench]) do
+                  NextToken;
+               end; {if}
+            if token.kind in [lparench,asteriskch,lbrackch] then
+               NonEmptyAbstractDeclarator;
+            Match(rparench,12);
             end; {else}
          end {if token.kind = lparench}
       else if token.kind = asteriskch then begin
 
          {create a pointer type}
          NextToken;
-         AttributeSpecifierSequence;
          tp := pointer(Malloc(sizeof(typeRecord)));
          tp^.size := cgPointerSize;
          tp^.saveDisp := 0;
          tp^.qualifiers := [];
          tp^.kind := pointerType;
-         tp^.wasStarVLA := false;
          while token.kind in [constsy,volatilesy,restrictsy] do begin
             if token.kind = constsy then
                tp^.qualifiers := tp^.qualifiers + [tqConst]
@@ -5109,24 +4246,35 @@ var
 
          {create an array type}
          NextToken;
+         if token.kind = rbrackch then
+            expressionValue := 0
+         else begin
+            Expression(arrayExpression, [rbrackch]);
+            if expressionValue <= 0 then begin
+               Error(45);
+               expressionValue := 1;
+               end; {if}
+            end; {else}
          tp := pointer(Malloc(sizeof(typeRecord)));
          tp^.saveDisp := 0;
          tp^.kind := arrayType;
-         tp^.isVariableLength := false;
-         tp^.elements := 0;
-         tp^.aQualifiers := [];
+         tp^.elements := expressionValue;
          tp^.fType := tl;
-         if token.kind = rbrackch then
-            tp^.elements := 0
-         else
-            ArrayLengthExpression(tp);
          tl := tp;
          Match(rbrackch,24);
-         AttributeSpecifierSequence;
          end; {else}
 
       if token.kind = lparench then begin
          {create a function type}
+         NextToken;
+         pcount := 1;
+         while (token.kind <> eofsy) and (pcount <> 0) do begin
+            if token.kind = rparench then
+               pcount := pcount-1
+            else if token.kind = lparench then
+               pcount := pcount+1;
+            NextToken;
+            end; {while}
          tp := pointer(Calloc(sizeof(typeRecord)));
          {tp^.size := 0;}
          {tp.saveDisp := 0;}
@@ -5140,62 +4288,7 @@ var
          {tp^.toolNum := 0;}
          {tp^.dispatcher := 0;}
          tp^.fType := Unqualify(tl);
-
-         NextToken;
-         if token.kind in prototypeParameterDeclarationStart then begin
-            {handle a prototype variable list}
-            PushTable;
-            done := false;
-            with tp^ do begin
-               prototyped := true;      {it is prototyped}
-               repeat                   {collect the declarations}
-                  if token.kind in prototypeParameterDeclarationStart then begin
-                     DoDeclaration(true);
-                     if protoType <> nil then begin
-                        if (parameterList = nil)
-                           and StrictCompTypes(protoType, voidPtr)
-                           and ((protoVariable = nil)
-                              or (protoVariable^.name^ = '?'))
-                           and (token.kind = rparench) then
-                           {it is a (void) prototype: no parameters}
-                        else begin
-                           wp := pointer(Malloc(sizeof(parameterRecord)));
-                           wp^.next := parameterList;
-                           parameterList := wp;
-                           wp^.parameter := protoVariable;
-                           wp^.parameterType := protoType;
-                           end; {else}
-                        end; {if}
-                     if token.kind = commach then begin
-                        NextToken;
-                        if token.kind = dotdotdotsy then begin
-                           NextToken;
-                           varargs := true;
-                           done := true;
-                           end; {if}
-                        end {if}
-                     else
-                        done := true;
-                     end {if}
-                  else begin
-                     Error(26);
-                     done := true;
-                     end; {else}
-               until done;
-               end; {with}
-            PopTable;
-            end {if prototype}
-         else
-            if strictC23Prototypes then
-               tp^.prototyped := true
-            else
-               if cStd < c23 then
-                  if (lint & lintNotPrototyped) <> 0 then
-                     Error(105);
-
          tl := tp;
-         Match(rparench, 12);
-         AttributeSpecifierSequence;
          end; {if}
       end; {NonEmptyAbstractDeclarator}
 
@@ -5222,7 +4315,7 @@ while tl <> nil do begin                {reverse the list & compute array sizes}
    tp := tl^.aType;                     {NOTE: assumes aType, pType and fType overlap in typeRecord}
    tl^.aType := declSpecifiers.typeSpec;
    if tl^.kind = arrayType then
-      ComputeArraySize(tl);
+      tl^.size := tl^.elements * declSpecifiers.typeSpec^.size;
    declSpecifiers.typeSpec := tl;
    tl := tp;
    end; {while}
@@ -5246,23 +4339,17 @@ begin {DoStatement}
 case statementList^.kind of
 
    compoundSt: begin
-      AttributeSpecifierSequence;
       hasStatementNext := true;
       if token.kind = rbracech then begin
-         if haveAttributeSpecifier then
-            Error(192);
          hasStatementNext := false;
          EndCompoundStatement;
          end {if}
       else if (statementList^.doingDeclaration or allowMixedDeclarations)
-         and ((token.kind in localDeclarationStart) or
-            (haveAttributeSpecifier and (token.kind = semicolonch)))
+         and (token.kind in localDeclarationStart)
          then begin
          hasStatementNext := false;
-         if token.kind <> typedef then begin
-            keepAttributes := true;
-            DoDeclaration(false);
-            end {if}
+         if token.kind <> typedef then
+            DoDeclaration(false)
          else begin
             lToken := token;
             lSuppressMacroExpansions := suppressMacroExpansions;
@@ -5272,10 +4359,8 @@ case statementList^.kind of
             nToken := token;
             PutBackToken(nToken, false, false);
             token := lToken;
-            if nToken.kind <> colonch then begin
-               keepAttributes := true;
-               DoDeclaration(false);
-               end {if}
+            if nToken.kind <> colonch then
+               DoDeclaration(false)
             else
                hasStatementNext := true;
             end {else}
@@ -5289,8 +4374,7 @@ case statementList^.kind of
                firstCompoundStatement := false;
                end; {if}
             end; {if}
-         keepAttributes := true;
-         Statement(true);
+         Statement;
          end; {else}
       end;
  
@@ -5400,7 +4484,7 @@ var
       itype := itype^.dType;
    case itype^.kind of
 
-      scalarType,pointerType,nullptrType,enumType,functionType: begin
+      scalarType,pointerType,enumType,functionType: begin
          tree := iptr^.itree;           
          if tree = nil then goto 2;     {don't generate code in error case}
          LoadAddress;                   {load the destination address}
@@ -5463,8 +4547,8 @@ var
                else
                   Gen0t(pc_sto, itype^.baseType);
             enumType:
-               Error(enumTypeUsed); {Gen0t(pc_sto, cgWord);}
-            pointerType,nullptrType,functionType:
+               Gen0t(pc_sto, cgWord);
+            pointerType,functionType:
                Gen0t(pc_sto, cgULong);
             end; {case}
          if isCompoundLiteral then
@@ -5472,10 +4556,6 @@ var
 2:       end;
 
       arrayType: begin
-         if iType^.isVariableLength then begin
-            Error(57);
-            goto 1;
-            end; {if}
          elements := itype^.elements;
          if elements = 0 then goto 1;   {don't init flexible array member}
          if itype^.aType^.kind = scalarType then
@@ -5545,9 +4625,10 @@ else
 if variable^.class <> staticsy then begin
    if traceBack or debugFlag then
       if nameFound or debugFlag then
-         if (statementList <> nil) and not statementList^.doingDeclaration then
-            if lineNumber <> 0 then
-               RecordLineNumber(line);
+         if statementList <> nil then
+            if not statementList^.doingDeclaration then
+               if lineNumber <> 0 then
+                  RecordLineNumber(line);
    while iPtr <> nil do begin
       InitializeOneElement;
       iPtr := iPtr^.next;
@@ -5594,7 +4675,6 @@ tp^.size := len;
 {tp^.qualifiers := [];}
 tp^.kind := arrayType;
 tp^.aType := constCharPtr;
-tp^.isVariableLength := false;
 tp^.elements := len;
 id := NewSymbol(@'__func__', tp, staticsy, variableSpace, initialized, false);
 
@@ -5634,9 +4714,7 @@ var
    class: tokenEnum;                    {storage class}
 
 begin {MakeCompoundLiteral}
-if IsVLAType(tp) then
-   Error(199);
-if (functionTable <> nil) or ((cStd >= c23) and doingParameters) then
+if functionTable <> nil then
    class := autosy
 else
    class := staticsy;
@@ -5646,7 +4724,7 @@ id := NewSymbol(name, tp, class, variableSpace, defined, false);
 compoundLiteralNumber := compoundLiteralNumber + 1;
 if compoundLiteralNumber = 0 then
    Error(57);
-Initializer(id, false);
+Initializer(id);
 MakeCompoundLiteral := id;
 if class = autosy then begin
    id^.lln := GetLocalLabel;
@@ -5654,19 +4732,6 @@ if class = autosy then begin
    compoundLiteralToAllocate := id;
    end;
 end; {MakeCompoundLiteral}
-
-
-procedure EnableCodeGen;
-
-{  Start and enable code generator, if not already enabled      }
-
-begin {EnableCodeGen}
-if not codegenStarted and (liDCBGS.kFlag <> 0) then begin
-   CodeGenInit (outFileGS, liDCBGS.kFlag, doingPartial);
-   liDCBGS.kFlag := 3;
-   codegenStarted := true;
-   end; {if}
-end; {EnableCodeGen}
 
 
 procedure InitParser;
@@ -5697,19 +4762,18 @@ anonNumber := 0;                        {no anonymous structs/unions yet}
                                         {See C17 section 6.7 ff.}
 typeSpecifierStart := 
    [voidsy,charsy,shortsy,intsy,longsy,floatsy,doublesy,signedsy,unsignedsy,
-    extendedsy,compsy,_Boolsy,boolsy,_Complexsy,_Imaginarysy,_Atomicsy,
-    _BitIntsy,_Decimal32sy,_Decimal64sy,_Decimal128sy,structsy,unionsy,enumsy,
-    typeofsy,typeof_unqualsy,typedef];
+    extendedsy,compsy,_Boolsy,_Complexsy,_Imaginarysy,_Atomicsy,
+    structsy,unionsy,enumsy,typedef];
 
 storageClassSpecifiers :=
-   [typedefsy,externsy,staticsy,_Thread_localsy,thread_localsy,autosy,registersy];
+   [typedefsy,externsy,staticsy,_Thread_localsy,autosy,registersy];
 
 typeQualifiers :=
    [constsy,volatilesy,restrictsy,_Atomicsy];
 
 functionSpecifiers := [inlinesy,_Noreturnsy,pascalsy,asmsy];
 
-alignmentSpecifiers := [_Alignassy,alignassy];
+alignmentSpecifiers := [_Alignassy];
 
 declarationSpecifiersElement := typeSpecifierStart + storageClassSpecifiers
    + typeQualifiers + functionSpecifiers + alignmentSpecifiers;
@@ -5717,16 +4781,13 @@ declarationSpecifiersElement := typeSpecifierStart + storageClassSpecifiers
 specifierQualifierListElement := 
    typeSpecifierStart + typeQualifiers + alignmentSpecifiers + [pascalsy];
 
-structDeclarationStart :=
-   specifierQualifierListElement + [_Static_assertsy,static_assertsy,lbrackch];
+structDeclarationStart := specifierQualifierListElement + [_Static_assertsy];
 
-topLevelDeclarationStart := declarationSpecifiersElement
-   + [ident,segmentsy,_Static_assertsy,static_assertsy,lbrackch];
+topLevelDeclarationStart :=
+   declarationSpecifiersElement + [ident,segmentsy,_Static_assertsy];
 
-localDeclarationStart := declarationSpecifiersElement
-   + [_Static_assertsy,static_assertsy,lbrackch] - [asmsy];
-
-prototypeParameterDeclarationStart := declarationSpecifiersElement + [lbrackch];
+localDeclarationStart :=
+   declarationSpecifiersElement + [_Static_assertsy] - [asmsy];
 end; {InitParser}
 
 

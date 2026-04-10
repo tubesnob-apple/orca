@@ -1,0 +1,12 @@
+# Build outputs
+obj/
+orcalib
+liborca
+
+# Assembled object files left in repo root by iix assemble
+*.A
+*.ROOT
+
+# Compiled object files left in repo root by iix compile
+*.a
+*.root

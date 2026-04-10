@@ -118,6 +118,7 @@ procedure InitHeader {var fName: gsosOutString};
 {    fName - source file name (var for efficiency)		}
 
 begin {InitHeader}
+DoDefaultsDotH;
 end; {InitHeader}
 
 

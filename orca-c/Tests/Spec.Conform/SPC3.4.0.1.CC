@@ -8,6 +8,8 @@
 
 int printf(const char *, ...);
 
+#pragma libpath ":"
+
 #define    libFile(x)      <x>
 #define    userFile(x)     x
 #include   libFile(cfile1)

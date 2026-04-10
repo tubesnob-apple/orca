@@ -1,0 +1,95 @@
+# goldengate/Makefile — build SysFPEFloat using GoldenGate iix toolchain
+#
+# fpe.asm is assembled for its interface (used by other modules) but is NOT
+# included in the library — same as the original build script.
+
+MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+REPO_ROOT    := $(abspath $(MAKEFILE_DIR)/..)
+SRC_DIR      := $(REPO_ROOT)
+OBJ_DIR      := $(REPO_ROOT)/obj
+BIN_DIR      ?= $(MAKEFILE_DIR)
+INSTALL_SH   ?= $(MAKEFILE_DIR)/../../goldengate/install.sh
+GEN_VERSION  := $(abspath $(MAKEFILE_DIR)/../../goldengate/gen-version-asm.sh)
+VERSION      ?= 0.0.0
+AS       := iix assemble
+MAKELIB  := iix makelib
+CHTYP    := iix chtyp
+ASFLAGS  := +T
+OS := $(shell uname -s 2>/dev/null || echo Windows)
+ifeq ($(OS),Darwin)
+_GG_DEFAULT := $(HOME)/Library/GoldenGate
+else ifeq ($(OS),Linux)
+_GG_DEFAULT := /usr/local/share/GoldenGate
+else
+_GG_DEFAULT :=
+endif
+GG_ROOT := $(or $(GOLDEN_GATE),$(ORCA_ROOT),$(_GG_DEFAULT))
+LIBRARIES_DIR := $(GG_ROOT)/Libraries
+LIB_OUT := $(SRC_DIR)/SysFloat
+BIN_OUT := $(BIN_DIR)/SysFPEFloat
+
+VERSION_LABEL := SysFPEFloat
+# Modules included in the library
+ASM_MODULES := fp math stdio2 stdlib time fenv fpextra math2 int64 version
+
+# fpe.asm is assembled for interface only — must be built before fp.asm
+# which uses its interface, but is not added to the library.
+INTERFACE_MODULES := fpe
+
+.PHONY: all install clean FORCE
+
+all: $(BIN_OUT)
+
+FORCE:
+
+$(OBJ_DIR)/version.asm: FORCE | $(OBJ_DIR)
+	@$(GEN_VERSION) "$(VERSION_LABEL)" "$(VERSION)" $@
+
+$(OBJ_DIR)/version.A: $(OBJ_DIR)/version.asm | $(OBJ_DIR)
+	@echo "--- assemble version.asm (generated) ---"
+	cd $(SRC_DIR) && $(AS) $(ASFLAGS) obj/version.asm
+	mv $(SRC_DIR)/version.A $@
+	-mv $(SRC_DIR)/version.ROOT $(OBJ_DIR)/version.ROOT
+	$(CHTYP) -t obj $@
+
+# fpe.asm produces only .ROOT (interface, no code segment)
+$(OBJ_DIR)/fpe.ROOT: $(SRC_DIR)/fpe.asm $(SRC_DIR)/equates.asm | $(OBJ_DIR)
+	@echo "--- assemble fpe.asm (interface only) ---"
+	cd $(SRC_DIR) && $(AS) $(ASFLAGS) fpe.asm
+	-mv $(SRC_DIR)/fpe.A $(OBJ_DIR)/fpe.A
+	mv $(SRC_DIR)/fpe.ROOT $@
+
+$(OBJ_DIR)/%.A: $(SRC_DIR)/%.asm $(SRC_DIR)/equates.asm $(OBJ_DIR)/fpe.ROOT | $(OBJ_DIR)
+	@echo "--- assemble $*.asm ---"
+	cd $(SRC_DIR) && $(AS) $(ASFLAGS) $*.asm
+	mv $(SRC_DIR)/$*.A $@
+	-mv $(SRC_DIR)/$*.ROOT $(OBJ_DIR)/$*.ROOT
+	$(CHTYP) -t obj $@
+
+$(LIB_OUT): $(foreach m,$(ASM_MODULES),$(OBJ_DIR)/$(m).A)
+	@echo "=== makelib SysFPEFloat ==="
+	rm -f $(LIB_OUT)
+	@for m in $(ASM_MODULES); do \
+	  cd $(SRC_DIR) && $(MAKELIB) SysFloat +obj/$$m.a; \
+	done
+
+$(BIN_OUT): $(LIB_OUT) | $(BIN_DIR)
+	@if [ "$(BIN_DIR)" != "$(MAKEFILE_DIR)" ] && [ "$(BIN_OUT)" != "$(LIB_OUT)" ]; then \
+		cp -p $(LIB_OUT) $(BIN_OUT); \
+	fi
+
+$(OBJ_DIR):
+	mkdir -p $(OBJ_DIR)
+$(BIN_DIR):
+	mkdir -p $(BIN_DIR)
+
+install: all
+	@echo "--- install SysFPEFloat -> $(LIBRARIES_DIR)/SysFPEFloat ---"
+	$(INSTALL_SH) $(LIB_OUT) $(LIBRARIES_DIR)/SysFPEFloat $(GG_ROOT)
+
+clean:
+	rm -f $(foreach m,$(ASM_MODULES),$(OBJ_DIR)/$(m).A $(OBJ_DIR)/$(m).ROOT)
+	rm -f $(OBJ_DIR)/fpe.A $(OBJ_DIR)/fpe.ROOT
+	rm -f $(LIB_OUT) $(BIN_OUT)
+	rm -f $(SRC_DIR)/*.A $(SRC_DIR)/*.ROOT
+	@echo "Clean complete."

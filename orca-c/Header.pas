@@ -18,7 +18,7 @@ uses CCommon, MM, Scanner, Symbol, CGI;
 {$segment 'HEADER'}
 
 const
-   symFileVersion = 57;                 {version number of .sym file format}
+   symFileVersion = 45;                 {version number of .sym file format}
 
 var
    inhibitHeader: boolean;		{should .sym includes be blocked?}
@@ -676,188 +676,6 @@ procedure EndInclude {chPtr: ptr};
 {    2. Declared externally in Scanner.pas			}
 
 
-   procedure WriteType (tp: typePtr); forward;
-
-
-   procedure WriteIdent (ip: identPtr);
-
-   { write a symbol to the symbol file				}
-   {								}
-   { parameters:						}
-   {    ip - pointer to symbol entry				}
-
-   begin {WriteIdent}
-   WriteString(ip^.name);	
-   WriteType(ip^.itype);
-   if (ip^.disp = 0) and (ip^.bitDisp = 0) and (ip^.bitSize = 0) then
-      WriteByte(0)
-   else if (ip^.bitSize = 0) and (ip^.bitDisp = 0) then begin
-      if ip^.disp < maxint then begin
-         WriteByte(1);
-         WriteWord(ord(ip^.disp));
-         end {if}
-      else begin
-         WriteByte(2);
-         WriteLong(ip^.disp);
-         end; {else}
-      end {else if}
-   else begin
-      WriteByte(3);
-      WriteLong(ip^.disp);
-      WriteByte(ip^.bitDisp);
-      WriteByte(ip^.bitSize);
-      end; {else}
-   WriteByte(ord(ip^.state));
-   WriteByte(ord(ip^.isForwardDeclared));
-   WriteByte(ord(ip^.class));
-   WriteByte(ord(ip^.storage));
-   if ip^.storage = external then
-      WriteByte(ord(ip^.inlineDefinition));
-   {if ip^.storage = none then ip^.anonMemberField must be false}
-   end; {WriteIdent}
-
-
-   procedure WriteType {tp: typePtr};
-
-   { write a type entry to the symbol file			}
-   {								}
-   { parameters:						}
-   {    tp - pointer to type entry				}
-
-   var
-      ip: identPtr;			{for tracing field list}
-
-
-      procedure WriteParm (pp: parameterPtr);
-
-      { write a parameter list to the symbol file		}
-      {								}
-      { parameters:						}
-      {    pp - parameter pointer				}
-
-      begin {WriteParm}
-      while pp <> nil do begin
-         WriteByte(1);
-         WriteType(pp^.parameterType);
-         pp := pp^.next;
-         end; {while}
-      WriteByte(0);
-      end; {WriteParm}
-
-
-   begin {WriteType}
-   if tp = sCharPtr then
-      WriteByte(2)
-   else if tp = charPtr then
-      WriteByte(3)
-   else if tp = intPtr then
-      WriteByte(4)
-   else if tp = uIntPtr then
-      WriteByte(5)
-   else if tp = longPtr then
-      WriteByte(6)
-   else if tp = uLongPtr then
-      WriteByte(7)
-   else if tp = floatPtr then
-      WriteByte(8)
-   else if tp = doublePtr then
-      WriteByte(9)
-   else if tp = extendedPtr then
-      WriteByte(10)
-   else if tp = stringTypePtr then
-      WriteByte(11)
-   else if tp = voidPtr then
-      WriteByte(12)
-   else if tp = voidPtrPtr then
-      WriteByte(13)
-   else if tp = defaultStruct then
-      WriteByte(14)
-   else if tp = uCharPtr then
-      WriteByte(15)
-   else if tp = shortPtr then
-      WriteByte(16)
-   else if tp = uShortPtr then
-      WriteByte(17)
-   else if tp = utf16StringTypePtr then
-      WriteByte(18)
-   else if tp = utf32StringTypePtr then
-      WriteByte(19)
-   else if tp = utf8StringTypePtr then
-      WriteByte(20)
-   else if tp^.saveDisp <> 0 then begin
-      WriteByte(1);
-      WriteLong(tp^.saveDisp);
-      end {if}
-   else begin
-      WriteByte(0);
-      tp^.saveDisp := GetMark;
-      WriteLong(tp^.size);
-      WriteByte(ord(tqConst in tp^.qualifiers)
-         | (ord(tqVolatile in tp^.qualifiers) << 1)
-         | (ord(tqRestrict in tp^.qualifiers) << 2));
-      WriteByte(ord(tp^.kind));
-      case tp^.kind of
-         scalarType: begin
-            WriteByte(ord(tp^.baseType));
-            WriteByte(ord(tp^.cType));
-            if tp^.cType in [ctBitInt,ctUBitInt] then
-               WriteByte(tp^.bitIntWidth);
-            end;
-
-         arrayType: begin
-            WriteLong(tp^.elements);
-            WriteType(tp^.aType);
-            WriteByte(ord(tp^.isVariableLength));
-            end;
-
-         pointerType:
-            WriteType(tp^.pType);
-
-         functionType: begin
-            WriteByte((ord(tp^.varargs) << 2)
-               | (ord(tp^.prototyped) << 1) | ord(tp^.isPascal));
-            WriteWord(tp^.toolnum);
-            WriteLong(tp^.dispatcher);
-            WriteType(tp^.fType);
-            WriteParm(tp^.parameterList);
-            end;
-
-         enumConst: begin
-            WriteType(tp^.ecType);
-            WriteType(tp^.containingEnum);
-            WriteLong(tp^.eval.ll.lo);
-            WriteLong(tp^.eval.ll.hi);
-            WriteWord(tp^.eval.sign);
-            end;
-
-         enumType: begin
-            WriteType(tp^.underlyingType);
-            WriteByte(ord(tp^.fixedUnderlyingType));
-            WriteLong(tp^.ecCount);
-            end;
-
-         definedType:
-            WriteType(tp^.dType);
-
-         structType, unionType: begin
-            ip := tp^.fieldList;
-            while ip <> nil do begin
-               WriteByte(1);
-               WriteIdent(ip);
-               ip := ip^.next;
-               end; {while}
-            WriteByte(0);
-            WriteByte(ord(tp^.constMember));
-            WriteByte(ord(tp^.flexibleArrayMember));
-            end;
-
-         otherwise: ;
-      
-         end; {case}
-      end; {else}
-   end; {WriteType}
-
-
    procedure SaveMacroTable;
 
    { Save macros to the symbol file				}
@@ -891,16 +709,9 @@ procedure EndInclude {chPtr: ptr};
             end; {else}
 	 case token.class of
 	    identifier:		WriteString(token.name);
-	    intConstant:	begin
-	                        WriteType(token.itype);
-                                WriteWord(token.ival);
-                                end;
-            longConstant:	begin
-                                WriteType(token.ltype);
-                                WriteLong(token.lval);
-	                        end;
+	    intConstant:	WriteWord(token.ival);
+	    longConstant:	WriteLong(token.lval);
 	    longlongConstant:	begin
-                                WriteType(token.qtype);
                 		WriteLong(token.qval.lo);
                 		WriteLong(token.qval.hi);
                 		end;
@@ -931,7 +742,7 @@ procedure EndInclude {chPtr: ptr};
                WriteByte(mp^.parameters);
                WriteByte(ord(mp^.isVarargs));
                WriteByte(ord(mp^.readOnly));
-               WriteByte(ord(mp^.algorithm));
+               WriteByte(mp^.algorithm);
                tp := mp^.tokens;	{loop over token list}
                while tp <> nil do begin
 		  WriteByte(1);		{write tokenListRecord}
@@ -1064,14 +875,28 @@ procedure EndInclude {chPtr: ptr};
                         end; {while}
                      end; {p_path}
 
+                  p_libpath: begin
+                     pp := libPathList;
+                     count := 0;
+                     while pp <> nil do begin
+                        count := count+1;
+                        pp := pp^.next;
+                        end; {while}
+                     WriteWord(count);
+                     pp := libPathList;
+                     while pp <> nil do begin
+                        WriteString(pp^.path);
+                        pp := pp^.next;
+                        end; {while}
+                     end; {p_libpath}
+
                   p_ignore:
                      WriteByte(ord(skipIllegalTokens)
                         | (ord(allowLongIntChar) << 1)
                         | (ord(allowTokensAfterEndif) << 2)
                         | (ord(allowSlashSlashComments) << 3)
                         | (ord(allowMixedDeclarations) << 4)
-                        | (ord(looseTypeChecks) << 5)
-                        | (ord(not strictC23Prototypes) << 6));
+                        | (ord(looseTypeChecks) << 5));
 
                   p_segment: begin
                      for i := 1 to 10 do begin
@@ -1135,7 +960,174 @@ procedure EndInclude {chPtr: ptr};
          abort: boolean;		{abort due to initialized var?}
          efRec: setMarkOSDCB;		{SetEOFGS record}
          i: 0..hashSize;		{loop/index variable}
-         sp: identPtr;			{used to trace symbol lists}         
+         sp: identPtr;			{used to trace symbol lists}
+
+
+         procedure WriteIdent (ip: identPtr);
+
+         { write a symbol to the symbol file				}
+         {								}
+         { parameters:							}
+         {    ip - pointer to symbol entry				}
+
+
+            procedure WriteType (tp: typePtr);
+
+            { write a type entry to the symbol file			}
+            {								}
+            { parameters:						}
+            {    tp - pointer to type entry				}
+
+            var
+               ip: identPtr;			{for tracing field list}
+
+
+               procedure WriteParm (pp: parameterPtr);
+
+               { write a parameter list to the symbol file		}
+               {							}
+               { parameters:						}
+               {    pp - parameter pointer				}
+
+               begin {WriteParm}
+               while pp <> nil do begin
+                  WriteByte(1);
+                  WriteType(pp^.parameterType);
+                  pp := pp^.next;
+                  end; {while}
+               WriteByte(0);
+               end; {WriteParm}
+
+
+            begin {WriteType}
+            if tp = sCharPtr then
+               WriteByte(2)
+            else if tp = charPtr then
+               WriteByte(3)
+            else if tp = intPtr then
+               WriteByte(4)
+            else if tp = uIntPtr then
+               WriteByte(5)
+            else if tp = longPtr then
+               WriteByte(6)
+            else if tp = uLongPtr then
+               WriteByte(7)
+            else if tp = floatPtr then
+               WriteByte(8)
+            else if tp = doublePtr then
+               WriteByte(9)
+            else if tp = extendedPtr then
+               WriteByte(10)
+            else if tp = stringTypePtr then
+               WriteByte(11)
+            else if tp = voidPtr then
+               WriteByte(12)
+            else if tp = voidPtrPtr then
+               WriteByte(13)
+            else if tp = defaultStruct then
+               WriteByte(14)
+            else if tp = uCharPtr then
+               WriteByte(15)
+            else if tp = shortPtr then
+               WriteByte(16)
+            else if tp = uShortPtr then
+               WriteByte(17)
+            else if tp = utf16StringTypePtr then
+               WriteByte(18)
+            else if tp = utf32StringTypePtr then
+               WriteByte(19)
+            else if tp^.saveDisp <> 0 then begin
+               WriteByte(1);
+               WriteLong(tp^.saveDisp);
+               end {if}
+            else begin
+               WriteByte(0);
+               tp^.saveDisp := GetMark;
+               WriteLong(tp^.size);
+               WriteByte(ord(tqConst in tp^.qualifiers)
+                  | (ord(tqVolatile in tp^.qualifiers) << 1)
+                  | (ord(tqRestrict in tp^.qualifiers) << 2));
+               WriteByte(ord(tp^.kind));
+               case tp^.kind of
+        	  scalarType: begin
+        	     WriteByte(ord(tp^.baseType));
+        	     WriteByte(ord(tp^.cType));
+        	     end;
+
+        	  arrayType: begin
+        	     WriteLong(tp^.elements);
+        	     WriteType(tp^.aType);
+        	     end;
+
+        	  pointerType:
+        	     WriteType(tp^.pType);
+
+        	  functionType: begin
+        	     WriteByte((ord(tp^.varargs) << 2)
+                        | (ord(tp^.prototyped) << 1) | ord(tp^.isPascal));
+        	     WriteWord(tp^.toolnum);
+        	     WriteLong(tp^.dispatcher);
+        	     WriteType(tp^.fType);
+        	     WriteParm(tp^.parameterList);
+        	     end;
+
+        	  enumConst:
+        	     WriteWord(tp^.eval);
+
+        	  definedType:
+        	     WriteType(tp^.dType);
+
+        	  structType, unionType: begin
+        	     ip := tp^.fieldList;
+        	     while ip <> nil do begin
+                	WriteByte(1);
+                	WriteIdent(ip);
+                	ip := ip^.next;
+                	end; {while}
+        	     WriteByte(0);
+        	     WriteByte(ord(tp^.constMember));
+        	     WriteByte(ord(tp^.flexibleArrayMember));
+        	     end;
+
+		  otherwise: ;
+               
+        	  end; {case}
+               end; {else}
+            end; {WriteType}
+
+
+	 begin {WriteIdent}
+         WriteString(ip^.name);	
+         WriteType(ip^.itype);
+         if (ip^.disp = 0) and (ip^.bitDisp = 0) and (ip^.bitSize = 0) then
+            WriteByte(0)
+         else if (ip^.bitSize = 0) and (ip^.bitDisp = 0) then begin
+            if ip^.disp < maxint then begin
+               WriteByte(1);
+               WriteWord(ord(ip^.disp));
+               end {if}
+            else begin
+               WriteByte(2);
+               WriteLong(ip^.disp);
+               end; {else}
+            end {else if}
+         else begin
+            WriteByte(3);
+            WriteLong(ip^.disp);
+            WriteByte(ip^.bitDisp);
+            WriteByte(ip^.bitSize);
+            end; {else}
+         if ip^.iPtr <> nil then
+            abort := true;
+         WriteByte(ord(ip^.state));
+         WriteByte(ord(ip^.isForwardDeclared));
+         WriteByte(ord(ip^.class));
+         WriteByte(ord(ip^.storage));
+         if ip^.storage = external then
+            WriteByte(ord(ip^.inlineDefinition));
+         {if ip^.storage = none then ip^.anonMemberField must be false}
+	 end; {WriteIdent}
+         
 
       begin {SaveSymbol}
       abort := false;			{no reason to abort, yet}
@@ -1146,8 +1138,6 @@ procedure EndInclude {chPtr: ptr};
                sp^.saved := true;	{mark this one as saved}
                WriteWord(i);		{save the symbol}
                WriteIdent(sp);
-               if sp^.iPtr <> nil then
-                  abort := true;
                end; {if}
             sp := sp^.next;
             end; {while}
@@ -1376,256 +1366,6 @@ var
    end; {PrintIncludes}
 
 
-   procedure ReadType (var tp: typePtr); forward;
-
-
-   function ReadIdent: identPtr;
-
-   { Read an identifier from the file				}
-   {								}
-   { Returns: Pointer to the new identifier			}
-
-   var
-      format: 0..3;			{storage format}
-      sp: identPtr;			{identifier being constructed}
-
-   begin {ReadIdent}
-   sp := pointer(GMalloc(sizeof(identRecord)));
-   sp^.next := nil;
-   sp^.saved := false;
-   sp^.name := ReadString;
-   ReadType(sp^.itype);
-   format := ReadByte;
-   if format = 0 then begin
-      sp^.disp := 0;
-      sp^.bitDisp := 0;
-      sp^.bitSize := 0;
-      end {if}
-   else if format = 1 then begin
-      sp^.disp := ReadWord;
-      sp^.bitDisp := 0;
-      sp^.bitSize := 0;
-      end {else if}
-   else if format = 2 then begin
-      sp^.disp := ReadLong;
-      sp^.bitDisp := 0;
-      sp^.bitSize := 0;
-      end {else if}
-   else begin
-      sp^.disp := ReadLong;
-      sp^.bitDisp := ReadByte;
-      sp^.bitSize := ReadByte;
-      end; {else}
-   sp^.iPtr := nil;
-   sp^.state := stateKind(ReadByte);
-   sp^.isForwardDeclared := boolean(ReadByte);
-   sp^.class := tokenEnum(ReadByte);
-   sp^.storage := storageType(ReadByte);
-   sp^.used := false;
-   sp^.underspecified := false;
-   sp^.nextVMSym := nil;
-   if sp^.storage = none then
-      sp^.anonMemberField := false
-   else if sp^.storage = external then
-      sp^.inlineDefinition := boolean(ReadByte);
-   ReadIdent := sp;
-   end; {ReadIdent}
-
-
-   procedure ReadType {var tp: typePtr};
-
-   { read a type from the symbol file				}
-   {								}
-   { parameters:						}
-   {    tp - (output) type entry				}
-
-   var
-      disp: longint;			{disp read from symbol file}
-      ep: identPtr;			{end of list of field names}
-      ip: identPtr;			{for tracing field list}
-      tdisp: typeDispPtr;		{used to trace, add to typeDispList}
-      val: integer;			{temp word}
-
-
-      procedure ReadParm (var pp: parameterPtr);
-
-      { read a parameter list from the symbol file		}
-      {								}
-      { parameters:						}
-      {    pp - (output) parameter pointer			}
-
-      var
-         ep: parameterPtr;		{last parameter in list}
-         np: parameterPtr;		{new parameter}
-
-      begin {ReadParm}
-      pp := nil;
-      ep := nil;
-      while ReadByte = 1 do begin
-         np := parameterPtr(GMalloc(sizeof(parameterRecord)));
-         np^.next := nil;
-         np^.parameter := nil;
-         ReadType(np^.parameterType);
-         if ep = nil then
-            pp := np
-         else
-            ep^.next := np;
-         ep := np;
-         end; {while}
-      end; {ReadParm}
-
-
-   begin {ReadType}
-   case ReadByte of
-      0: begin			{read a new type}
-         tp := typePtr(GMalloc(sizeof(typeRecord)));
-         new(tdisp);
-         tdisp^.next := typeDispList;
-         typeDispList := tdisp;
-         tdisp^.saveDisp := ord4(symPtr) - ord4(symStartPtr);
-         tdisp^.tPtr := tp;
-         tp^.size := ReadLong;
-         tp^.saveDisp := 0;
-         val := ReadByte;
-         if odd(val) then
-            tp^.qualifiers := [tqConst]
-         else
-            tp^.qualifiers := [];
-         if odd(val >> 1) then begin
-            tp^.qualifiers := tp^.qualifiers + [tqVolatile];
-            volatile := true;
-            end; {if}
-         if odd(val >> 2) then
-            tp^.qualifiers := tp^.qualifiers + [tqRestrict];
-         tp^.kind := typeKind(ReadByte);
-         case tp^.kind of
-            scalarType: begin
-               tp^.baseType := baseTypeEnum(ReadByte);
-               tp^.cType := cTypeEnum(ReadByte);
-               if tp^.cType in [ctBitInt,ctUBitInt] then
-                  tp^.bitIntWidth := ReadByte
-               else
-                  tp^.bitIntWidth := 0;
-               end;
-
-            arrayType: begin
-               tp^.elements := ReadLong;
-               ReadType(tp^.aType);
-               tp^.isVariableLength := boolean(ReadByte);
-               {Remaining fields only matter for array types within a}
-               {function definition (parameter declarations or body).}
-               tp^.sizeLLN := 0;
-               tp^.sizeTree := nil;
-               tp^.aQualifiers := [];
-               end;
-
-            pointerType: begin
-               ReadType(tp^.pType);
-               tp^.wasStarVLA := false;
-               end;
-
-            functionType: begin
-               val := ReadByte;
-               tp^.varargs := odd(val >> 2);
-               tp^.prototyped := odd(val >> 1);
-               tp^.isPascal := odd(val);
-               tp^.toolnum := ReadWord;
-               tp^.dispatcher := ReadLong;
-               ReadType(tp^.fType);
-               ReadParm(tp^.parameterList);
-               end;
-
-            enumConst: begin
-               ReadType(tp^.ecType);
-               ReadType(tp^.containingEnum);
-               tp^.eval.ll.lo := ReadLong;
-               tp^.eval.ll.hi := ReadLong;
-               tp^.eval.sign := ReadWord;
-               end;
-
-            enumType: begin
-               ReadType(tp^.underlyingType);
-               tp^.fixedUnderlyingType := boolean(ReadByte);
-               tp^.ecCount := ReadLong;
-               tp^.doingEnumerators := false;
-               end;
-
-            definedType:
-               ReadType(tp^.dType);
-
-            structType, unionType: begin
-               tp^.fieldList := nil;
-               ep := nil;
-               while ReadByte = 1 do begin
-                  ip := ReadIdent;
-                  if ep = nil then
-                     tp^.fieldList := ip
-                  else
-                     ep^.next := ip;
-                  ep := ip;
-                  end; {while}
-               tp^.constMember := boolean(ReadByte);
-               tp^.flexibleArrayMember := boolean(ReadByte);
-               end;
-
-            nullptrType: ;
-
-            otherwise: begin
-               PurgeSymbols;
-               DestroySymbolFile;
-               TermError(12);
-               end;
-
-            end; {case}
-         end; {case 0}
-
-      1: begin			{read a type displacement}
-         tdisp := typeDispList;
-         disp := ReadLong;
-         tp := nil;
-         while tdisp <> nil do
-            if tdisp^.saveDisp = disp then begin
-               tp := tdisp^.tPtr;
-               tdisp := nil;
-               end {if}
-            else 
-               tdisp := tdisp^.next;
-         if tp = nil then begin
-            PurgeSymbols;
-            DestroySymbolFile;
-            TermError(12);
-            end; {if}
-         end; {case 1}
-
-      2: tp := sCharPtr;
-      3: tp := charPtr;
-      4: tp := intPtr;
-      5: tp := uIntPtr;
-      6: tp := longPtr;
-      7: tp := uLongPtr;
-      8: tp := floatPtr;
-      9: tp := doublePtr;
-      10: tp := extendedPtr;
-      11: tp := stringTypePtr;
-      12: tp := voidPtr;
-      13: tp := voidPtrPtr;
-      14: tp := defaultStruct;
-      15: tp := uCharPtr;
-      16: tp := shortPtr;
-      17: tp := uShortPtr;
-      18: tp := utf16StringTypePtr;
-      19: tp := utf32StringTypePtr;
-      20: tp := utf8StringTypePtr;
-
-      otherwise: begin
-         PurgeSymbols;
-         DestroySymbolFile;
-         TermError(12);
-         end;
-      end; {case}
-   end; {ReadType}
-
-
    procedure ReadMacroTable;
 
    { Read macros from the symbol file				}
@@ -1655,16 +1395,9 @@ var
          token.numstring := ReadString;
       case token.class of 
 	 identifier:		token.name := ReadString;
-	 intConstant:		begin
-	                        ReadType(token.itype);
-	                        token.ival := ReadWord;
-	                        end;
-	 longConstant:		begin
-	                        ReadType(token.ltype);
-	                        token.lval := ReadLong;
-	                        end;
+	 intConstant:		token.ival := ReadWord;
+	 longConstant:		token.lval := ReadLong;
 	 longlongConstant:	begin
-	                        ReadType(token.qtype);
 			        token.qval.lo := ReadLong;
                 	        token.qval.hi := ReadLong;
                 	        end;
@@ -1702,7 +1435,7 @@ var
          mp^.parameters := mp^.parameters | $FF00;
       mp^.isVarargs := boolean(ReadByte);
       mp^.readOnly := boolean(ReadByte);
-      mp^.algorithm := macroAlgEnum(ReadByte);
+      mp^.algorithm := ReadByte;
       mp^.tokens := nil;
       ep := nil;
       while ReadByte <> 0 do begin
@@ -1860,6 +1593,23 @@ var
                end; {while}
             end; {p_path}
 
+         p_libpath: begin
+            i := ReadWord;
+            libPathList := nil;
+            ppe := nil;
+            while i <> 0 do begin
+               pp := pathRecordPtr(GMalloc(sizeof(pathRecord)));
+               pp^.path := ReadString;
+               pp^.next := nil;
+               if libPathList = nil then
+                  libPathList := pp
+               else
+                  ppe^.next := pp;
+               ppe := pp;
+               i := i-1;
+               end; {while}
+            end; {p_libpath}
+
          p_ignore: begin
             i := ReadByte;
             skipIllegalTokens := odd(i);
@@ -1869,7 +1619,6 @@ var
             allowMixedDeclarations := odd(i >> 4);
             c99Scope := allowMixedDeclarations;
             looseTypeChecks := odd(i >> 5);
-            strictC23Prototypes := not odd(i >> 6);
             end;
          
          p_segment: begin
@@ -1889,7 +1638,6 @@ var
             i := ReadByte;
             extendedKeywords := odd(i);
             extendedParameters := odd(i >> 1);
-            SetKeywordMask;
             end;
 
          otherwise: begin
@@ -1911,6 +1659,228 @@ var
       hashPtr: ^identPtr;		{pointer to hash bucket in symbol table}
       sePtr: ptr;			{end of symbol table}
       sp: identPtr;			{identifier being constructed}
+
+
+      function ReadIdent: identPtr;
+
+      { Read an identifier from the file			}
+      {								}
+      { Returns: Pointer to the new identifier			}
+
+      var
+         format: 0..3;			{storage format}
+	 sp: identPtr;			{identifier being constructed}
+
+
+	 procedure ReadType (var tp: typePtr);
+
+	 { read a type from the symbol file				}
+	 {								}
+	 { parameters:							}
+	 {    tp - (output) type entry					}
+
+	 var
+            disp: longint;			{disp read from symbol file}
+            ep: identPtr;			{end of list of field names}
+            ip: identPtr;			{for tracing field list}
+            tdisp: typeDispPtr;			{used to trace, add to typeDispList}
+            val: integer;			{temp word}
+
+
+            procedure ReadParm (var pp: parameterPtr);
+
+            { read a parameter list from the symbol file		}
+            {								}
+            { parameters:						}
+            {    pp - (output) parameter pointer			}
+
+            var
+               ep: parameterPtr;		{last parameter in list}
+               np: parameterPtr;		{new parameter}
+
+            begin {ReadParm}
+            pp := nil;
+            ep := nil;
+            while ReadByte = 1 do begin
+               np := parameterPtr(GMalloc(sizeof(parameterRecord)));
+               np^.next := nil;
+               np^.parameter := nil;
+               ReadType(np^.parameterType);
+               if ep = nil then
+                  pp := np
+               else
+                  ep^.next := np;
+               ep := np;
+               end; {while}
+            end; {ReadParm}
+
+
+	 begin {ReadType}
+         case ReadByte of
+            0: begin			{read a new type}
+	       tp := typePtr(GMalloc(sizeof(typeRecord)));
+               new(tdisp);
+               tdisp^.next := typeDispList;
+               typeDispList := tdisp;
+               tdisp^.saveDisp := ord4(symPtr) - ord4(symStartPtr);
+               tdisp^.tPtr := tp;
+	       tp^.size := ReadLong;
+               tp^.saveDisp := 0;
+	       val := ReadByte;
+	       if odd(val) then
+	          tp^.qualifiers := [tqConst]
+	       else
+	          tp^.qualifiers := [];
+	       if odd(val >> 1) then begin
+	          tp^.qualifiers := tp^.qualifiers + [tqVolatile];
+	          volatile := true;
+	          end; {if}
+	       if odd(val >> 2) then
+	          tp^.qualifiers := tp^.qualifiers + [tqRestrict];
+	       tp^.kind := typeKind(ReadByte);
+	       case tp^.kind of
+        	  scalarType: begin
+        	     tp^.baseType := baseTypeEnum(ReadByte);
+        	     tp^.cType := cTypeEnum(ReadByte);
+        	     end;
+
+        	  arrayType: begin
+        	     tp^.elements := ReadLong;
+        	     ReadType(tp^.aType);
+        	     end;
+
+        	  pointerType: 
+        	     ReadType(tp^.pType);
+
+        	  functionType: begin
+        	     val := ReadByte;
+        	     tp^.varargs := odd(val >> 2);
+        	     tp^.prototyped := odd(val >> 1);
+        	     tp^.isPascal := odd(val);
+        	     tp^.toolnum := ReadWord;
+        	     tp^.dispatcher := ReadLong;
+        	     ReadType(tp^.fType);
+        	     ReadParm(tp^.parameterList);
+        	     end;
+
+        	  enumConst:
+        	     tp^.eval := ReadWord;
+
+        	  definedType:
+        	     ReadType(tp^.dType);
+
+        	  structType, unionType: begin
+        	     tp^.fieldList := nil;
+        	     ep := nil;
+        	     while ReadByte = 1 do begin
+        		ip := ReadIdent;
+        		if ep = nil then
+                	   tp^.fieldList := ip
+        		else
+                	   ep^.next := ip;
+        		ep := ip;
+        		end; {while}
+        	     tp^.constMember := boolean(ReadByte);
+        	     tp^.flexibleArrayMember := boolean(ReadByte);
+        	     end;
+
+        	  enumType: ;
+
+        	  otherwise: begin
+        	     PurgeSymbols;
+        	     DestroySymbolFile;
+        	     TermError(12);
+        	     end;
+
+        	  end; {case}
+               end; {case 0}
+
+            1: begin			{read a type displacement}
+               tdisp := typeDispList;
+               disp := ReadLong;
+               tp := nil;
+               while tdisp <> nil do
+        	  if tdisp^.saveDisp = disp then begin
+                     tp := tdisp^.tPtr;
+                     tdisp := nil;
+                     end {if}
+        	  else 
+                     tdisp := tdisp^.next;
+               if tp = nil then begin
+                  PurgeSymbols;
+                  DestroySymbolFile;
+                  TermError(12);
+                  end; {if}
+               end; {case 1}
+
+            2: tp := sCharPtr;
+            3: tp := charPtr;
+            4: tp := intPtr;
+            5: tp := uIntPtr;
+            6: tp := longPtr;
+            7: tp := uLongPtr;
+            8: tp := floatPtr;
+            9: tp := doublePtr;
+            10: tp := extendedPtr;
+            11: tp := stringTypePtr;
+            12: tp := voidPtr;
+            13: tp := voidPtrPtr;
+            14: tp := defaultStruct;
+            15: tp := uCharPtr;
+            16: tp := shortPtr;
+            17: tp := uShortPtr;
+            18: tp := utf16StringTypePtr;
+            19: tp := utf32StringTypePtr;
+
+            otherwise: begin
+               PurgeSymbols;
+               DestroySymbolFile;
+               TermError(12);
+               end;
+            end; {case}
+	 end; {ReadType}
+
+
+      begin {ReadIdent}
+      sp := pointer(GMalloc(sizeof(identRecord)));
+      sp^.next := nil;
+      sp^.saved := false;
+      sp^.name := ReadString;
+      ReadType(sp^.itype);
+      format := ReadByte;
+      if format = 0 then begin
+         sp^.disp := 0;
+         sp^.bitDisp := 0;
+         sp^.bitSize := 0;
+         end {if}
+      else if format = 1 then begin
+         sp^.disp := ReadWord;
+         sp^.bitDisp := 0;
+         sp^.bitSize := 0;
+         end {else if}
+      else if format = 2 then begin
+         sp^.disp := ReadLong;
+         sp^.bitDisp := 0;
+         sp^.bitSize := 0;
+         end {else if}
+      else begin
+	 sp^.disp := ReadLong;
+	 sp^.bitDisp := ReadByte;
+	 sp^.bitSize := ReadByte;
+         end; {else}
+      sp^.iPtr := nil;
+      sp^.state := stateKind(ReadByte);
+      sp^.isForwardDeclared := boolean(ReadByte);
+      sp^.class := tokenEnum(ReadByte);
+      sp^.storage := storageType(ReadByte);
+      sp^.used := false;
+      if sp^.storage = none then
+         sp^.anonMemberField := false
+      else if sp^.storage = external then
+         sp^.inlineDefinition := boolean(ReadByte);
+      ReadIdent := sp;
+      end; {ReadIdent}
+
 
    begin {ReadSymbolTable}
    sePtr := symPtr;			{read the block length}

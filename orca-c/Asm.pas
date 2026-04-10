@@ -254,7 +254,7 @@ var
             operation := minus;
          NextToken;
          tcode := code^;
-         Expression(integerConstantExpression, stop);
+         Expression(arrayExpression, stop);
          code^ := tcode;
          value := expressionValue;
          if expressionType^.kind = scalarType then
@@ -270,7 +270,7 @@ var
       operation := none;
       isConstant := true;
       tcode := code^;
-      Expression(integerConstantExpression, stop);
+      Expression(arrayExpression, stop);
       code^ := tcode;
       value := expressionValue;
       if expressionType^.kind = scalarType then

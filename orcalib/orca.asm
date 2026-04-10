@@ -156,3 +156,84 @@ userid   start
          lda   >~USER_ID
          rtl
          end
+
+****************************************************************
+*
+*  char *getVersionString(unsigned int userID)
+*
+*  Returns a pointer to the null-terminated version string from
+*  the ~Version segment of the binary identified by userID, or
+*  NULL if no ~Version segment is found.
+*
+*  Uses Loader calls GetPathname ($1011) and LoadSegName ($0D11).
+*
+****************************************************************
+*
+getVersionString start
+result   equ   1
+
+         csubroutine (2:uID),4
+
+         phb
+         phk
+         plb
+
+* GetPathname(uID) — returns pointer to class 1 pathname
+         pha                         result space (long)
+         pha
+         ph2   <uID
+         ldx   #$1011                GetPathname
+         jsl   $E10000
+         sta   >~TOOLERROR
+         bcs   err1
+
+         pla
+         sta   pathPtr
+         pla
+         sta   pathPtr+2
+
+* LoadSegName(uID, pathname, "~Version  ") — returns segAddr + info
+         tsc                         reserve 10 bytes result space
+         sec
+         sbc   #10
+         tcs
+         ph2   <uID
+         lda   pathPtr+2
+         pha
+         lda   pathPtr
+         pha
+         ph4   #vName
+         ldx   #$0D11                LoadSegName
+         jsl   $E10000
+         sta   >~TOOLERROR
+         bcs   err2
+
+         pla                         segAddr (low)
+         sta   result
+         pla                         segAddr (high)
+         sta   result+2
+         pla                         discard userID
+         pla                         discard fileNum
+         pla                         discard segNum
+         bra   done
+
+err1     pla                         discard GetPathname result space
+         pla
+         bra   null
+
+err2     tsc                         discard LoadSegName result space
+         clc
+         adc   #10
+         tcs
+
+null     stz   result
+         stz   result+2
+
+done     plb
+         creturn 4:result
+;
+;  Local data
+;
+pathPtr  ds    4
+vName    dc    c'~Version  '         10-char blank-padded segment name
+         end

@@ -1,4 +1,5 @@
          mcopy objout.macros
+         datachk off
 ****************************************************************
 *
 *  CnOut - write a byte to the constant buffer
@@ -8,7 +9,7 @@
 *
 ****************************************************************
 *
-CnOut    start
+CnOut    start CodeGen
 maxCBuffLen equ 191                     max index into the constant buffer
 
          lda   cBuffLen                 if cBuffLen = maxCBuffLen then
@@ -39,7 +40,7 @@ lb1      phb                            cBuff[cBuffLen] := i;
 *
 ****************************************************************
 *
-CnOut2   start
+CnOut2   start CodeGen
 maxCBuffLen equ 191                     max index into the constant buffer
 
          lda   cBuffLen                 if cBuffLen+1 >= maxCBuffLen then
@@ -71,7 +72,7 @@ lb1      phb                            cBuff[cBuffLen] := i;
 *
 ****************************************************************
 *
-COut     start
+COut     start CodeGen
 
          phb                            OutByte(b);
          pla
@@ -81,7 +82,7 @@ COut     start
          pha
          plb
          jsr   OutByte
-         inc   blkcnt                   blkcnt := blkcnt+1;
+         inc4  blkcnt                   blkcnt := blkcnt+1;
          inc4  pc                       pc := pc+1;
          rtl
          end
@@ -95,7 +96,7 @@ COut     start
 *
 ****************************************************************
 *
-Out2     start
+Out2     start CodeGen
 
          phb                            OutWord(w);
          pla
@@ -105,8 +106,8 @@ Out2     start
          pha
          plb
          jsr   OutWord
-         inc   blkcnt                   blkcnt := blkcnt+2;
-         inc   blkcnt
+         inc4  blkcnt                   blkcnt := blkcnt+2;
+         inc4  blkcnt
          rtl
          end
 
@@ -119,7 +120,7 @@ Out2     start
 *
 ****************************************************************
 *
-Out      start
+Out      start CodeGen
 
          phb                            OutByte(b);
          pla
@@ -129,7 +130,7 @@ Out      start
          pha
          plb
          jsr   OutByte
-         inc   blkcnt                   blkcnt := blkcnt+1;
+         inc4  blkcnt                   blkcnt := blkcnt+1;
          rtl
          end
 
@@ -142,23 +143,26 @@ Out      start
 *
 ****************************************************************
 *
-OutByte  private
-buffSize equ   16384                    buffer size
-                                                   
-         lda   objLen                   if objLen+segDisp+1 = buffSize then
-         sec
+OutByte  private CodeGen
+
+         lda   objLen                   if objLen+segDisp >= buffSize then
+         clc
          adc   segDisp
-         cmp   #buffSize
-         blt   lb2
-         phx                               PurgeObjBuffer;
-         jsl   PurgeObjBuffer
+         lda   objLen+2
+         adc   segDisp+2
+         beq   lb2
+         and   minusBuffSize+2
+         beq   lb2
+         phx                               MakeSpaceInObjBuffer;
+         jsl   MakeSpaceInObjBuffer
          plx
-         lda   objLen                      check for segment overflow
-         sec
-         adc   segDisp
-         cmp   #buffSize
-         bge   lb2a
-lb2      ph4   objPtr                   p := pointer(ord4(objPtr)+segDisp);
+         clc
+lb2      anop                           carry must be clear
+         lda   objPtr+2                 p := pointer(ord4(objPtr)+segDisp);
+         adc   segDisp+2
+         pha
+         lda   objPtr
+         pha
          tsc                            p^ := b;
          phd
          tcd
@@ -167,19 +171,13 @@ lb2      ph4   objPtr                   p := pointer(ord4(objPtr)+segDisp);
          txa
          sta   [1],Y
          long  M
-         inc   segDisp                  segDisp := segDisp+1;
+         inc4  segDisp                  segDisp := segDisp+1;
 
          pld
          tsc
          clc
          adc   #4
          tcs
-         rts
-
-lb2a     lda   #$1000                   handle a segment buffer overflow
-         sta   segDisp
-         ph2   #112
-         jsl   Error
          rts
          end
 
@@ -192,32 +190,34 @@ lb2a     lda   #$1000                   handle a segment buffer overflow
 *
 ****************************************************************
 *
-OutWord  private
-buffSize equ   16384                    buffer size
+OutWord  private CodeGen
 
-         lda   objLen                   if objLen+segDisp+2 = buffSize then
+         lda   objLen                   if objLen+segDisp+1 >= buffSize then
          sec
          adc   segDisp
-         cmp   #buffSize-1
-         blt   lb2
-         phx                               PurgeObjBuffer;
-         jsl   PurgeObjBuffer
+         lda   objLen+2
+         adc   segDisp+2
+         beq   lb2
+         and   minusBuffSize+2
+         beq   lb2
+         phx                               MakeSpaceInObjBuffer;
+         jsl   MakeSpaceInObjBuffer
          plx
-         lda   objLen                      check for segment overflow
-         sec
-         adc   segDisp
-         cmp   #buffSize-1
-         bge   lb3
-lb2      ph4   objPtr                   p := pointer(ord4(objPtr)+segDisp);
+         clc
+lb2      anop                           carry must be clear
+         lda   objPtr+2                 p := pointer(ord4(objPtr)+segDisp);
+         adc   segDisp+2
+         pha
+         lda   objPtr
+         pha
          tsc                            p^ := b;
          phd
          tcd
          ldy   segDisp
          txa
          sta   [1],Y
-         iny                            segDisp := segDisp+2;
-         iny
-         sty   segDisp
+         inc4  segDisp                   segDisp := segDisp+2;
+         inc4  segDisp
 
          pld
          tsc
@@ -225,10 +225,5 @@ lb2      ph4   objPtr                   p := pointer(ord4(objPtr)+segDisp);
          adc   #4
          tcs
          rts
-
-lb3      ph2   #112                     flag segment overflow error
-         jsl   Error
-         lda   #$1000
-         sta   segDisp
-         rts
          end
+

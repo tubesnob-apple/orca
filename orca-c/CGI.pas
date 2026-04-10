@@ -221,8 +221,8 @@ const
                                         {---------------}
    maxCBuff     =       191;            {length of constant buffer}
                                         {Note: maxlabel is also defined in CCommon.pas}
-                                        {Note: maxlabel is also defined in CGC.asm}
-   maxLabel     =       3275;           {max # of internal labels}
+                                        {Note: maxlabel no longer defined in CGC.asm (InitLabels now in Native2.pas)}
+   maxLabel     =     16383;           {max # of internal labels}
    maxLocalLabel =      512;            {max # local variables}
    maxString    =       32760;          {max # chars in string space}
 
@@ -259,7 +259,7 @@ type
        dc_prm,pc_nat,pc_bno,pc_nop,pc_psh,pc_ili,pc_iil,pc_ild,pc_idl,
        pc_bqr,pc_bqx,pc_baq,pc_bnq,pc_ngq,pc_adq,pc_sbq,pc_mpq,pc_umq,pc_dvq,
        pc_udq,pc_mdq,pc_uqm,pc_slq,pc_sqr,pc_wsr,pc_rbo,pc_fix,pc_rev,pc_ckp,
-       pc_ckn,pc_sxi,pc_sxl,pc_sxq,pc_zxi,pc_zxl,pc_zxq,pc_zni,pc_znl,pc_znq);
+       pc_ckn);
 
                                         {intermediate code}
                                         {-----------------}
@@ -355,6 +355,7 @@ var
    fastMath: boolean;                   {do FP math opts that break IEEE rules?}
    floatCard: integer;                  {0 -> SANE; 1 -> FPE}
    floatSlot: integer;                  {FPE slot}
+   gnoStartup: boolean;                 {use GNO startup (skip ~_BWSTARTUP3)?}
    loopOptimizations: boolean;          {do loop optimizations?}
    noroot: boolean;                     {prevent creation of .root file?}
    npeephole: boolean;                  {do native code peephole optimizations?}
@@ -877,6 +878,7 @@ saveStack := not cLineOptimize;         {save/restore caller's stack reg}
 checkStack := false;                    {don't check stack for stack errors}
 stackSize := 0;				{default to the launcher's stack size}
 toolParms := false;                     {generate tool format parameters?}
+gnoStartup := false;                    {use standard ByteWorks startup}
 noroot := false;                        {create a .root segment}
 rtl := false;                           {return with a ~QUIT}
 floatCard := 0;                         {use SANE}
@@ -1528,7 +1530,7 @@ else begin
       lcode := DAGhead;
       while (lcode^.next <> start) and (lcode^.next <> nil) do
          lcode := lcode^.next;
-      if (lcode^.next = nil) and (start <> nil) then
+      if lcode^.next = nil then
          Error(cge1);
       lcode^.next := nil;
 {     PrintDAG(@'Removing: ', DAGhead); {debug}

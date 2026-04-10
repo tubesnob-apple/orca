@@ -38,7 +38,7 @@ type
       (p_startofenum,p_cda,p_cdev,p_float,p_keep,
        p_nda,p_debug,p_lint,p_memorymodel,p_expand,
        p_optimize,p_stacksize,p_toolparms,p_databank,p_rtl,
-       p_noroot,p_path,p_ignore,p_segment,p_nba,
+       p_noroot,p_gnostartup,p_path,p_libpath,p_ignore,p_segment,p_nba,
        p_xcmd,p_unix,p_line,p_fenv_access,p_extensions,
        p_endofenum);
 
@@ -52,11 +52,6 @@ type
       suppressPrint: boolean;           {suppress printing with #pragma expand?}
       tokenStart,tokenEnd: ptr;         {token start/end markers}
       end;
-
-   macroAlgEnum = (algNone,algLine,algFile,algDate,algTime,algOne,algVersion,
-                   algHosted,algPragma,algStdcVersion,algZero,algTwo,
-                   algPseudoMacro);
-
    macroRecordPtr = ^macroRecord;
    macroRecord = record                 {preprocessor macro definition}
       next: macroRecordPtr;
@@ -66,7 +61,7 @@ type
       isVarargs: boolean;
       tokens: tokenListRecordPtr;
       readOnly: boolean;
-      algorithm: macroAlgEnum;
+      algorithm: integer;
       end;
    macroTable = array[0..hashSize] of macroRecordPtr; {preprocessor macro list}
 
@@ -82,14 +77,13 @@ var
    ch: char;                            {next character to process}
    macros: ^macroTable;                 {preprocessor macro list}
    pathList: pathRecordPtr;		{additional search paths}
+   libPathList: pathRecordPtr;		{additional library include search paths}
    printMacroExpansions: boolean;       {print the token list?}
    preprocessing: boolean;              {doing pp directive or macro params?}
    suppressMacroExpansions: boolean;    {suppress printing even if requested?}
    reportEOL: boolean;                  {report eolsy as a token?}
    token: tokenType;                    {next token to process}
    doingFakeFile: boolean;              {processing tokens from fake "file" in memory?}
-   keywordMask: integer;                {mask of keyword categories to enable}
-   prohibitDefined: boolean;            {prohibit defined preprocessor operator}
 
                                         {#pragma ignore flags}
                                         {--------------------}
@@ -101,7 +95,6 @@ var
    allowMixedDeclarations: boolean;     {allow mixed declarations & stmts (C99)?}
    c99Scope: boolean;                   {follow C99 rules for block scopes?}
    looseTypeChecks: boolean;            {loosen some standard type checks?}
-   strictC23Prototypes: boolean;        {strictly follow C23 prototype rules?}
 
                                         {#pragma extensions flags}
                                         {------------------------}
@@ -113,15 +106,6 @@ var
 procedure DoDefaultsDotH;
 
 { Handle the defaults.h file					}
-
-
-function DoEmbed (doingHashEmbed: boolean): integer;
-
-{ #embed NAME pp-tokens(opt)                                    }
-{ __has_embed ( NAME pp-tokens(opt) )                           }
-{                                                               }
-{ parameter:                                                    }
-{     doingHashEmbed - true for #embed, false for __has_embed   }
 
 
 procedure Error (err: integer);
@@ -149,13 +133,6 @@ procedure ErrorWithExtraString (err:integer; extraStr: stringPtr);
 {                                                               }
 { loc - error location                                          }
 { err - error number                                            }
-
-
-function HasInclude: boolean;
-
-{ Parse an include file name and check if the file exists.      }
-{                                                               }
-{ Returns: true if a valid include file exists, false otherwise }
 
 
 procedure InitScanner (start, endPtr: ptr);
@@ -201,12 +178,6 @@ procedure PutBackToken (var token: tokenType; expandEnabled: boolean;
 {       suppressPrint - suppress printing with #pragma expand?  }
 
 
-procedure SetKeywordMask;
-
-{ Set the mask defining which keywords to recognize based on    }
-{ current language mode.                                        }
-
-
 procedure TermScanner;
 
 { Shut down the scanner.                                        }
@@ -227,18 +198,6 @@ const
    NEWLINE      = 10;                   {newline}
    RETURN       = 13;                   {RETURN key code}
    VT           = 11;                   {vertical tab}
-
-                                        {keyword categories}
-                                        {(also defined in Table.asm)}
-   c17keyword   = 1;
-   c23keyword   = 2;
-   orcacKeyword = 128;
-
-                                        {embed status values}
-                                        {(matching __has_embed results)}
-   embedNotFound = 0;
-   embedFound    = 1;
-   embedEmpty    = 2;
 
                                         {misc}
                                         {----}
@@ -265,11 +224,6 @@ type
       disp: longint;                    {disp of next character to process}
       end;
 
-   closeOSDCB = record                  {Close DCB}
-      pcount: integer;
-      refNum: integer;
-      end;
-
    getFileInfoOSDCB = record
       pcount: integer;
       pathName: gsosInStringPtr;
@@ -284,34 +238,6 @@ type
       blocksUsed: longint;
       resourceEOF: longint;
       resourceBlocks: longint;
-      end;
-
-   openOSDCB = record                   {Open DCB}
-      pcount: integer;
-      refNum: integer;
-      pathName: gsosInStringPtr;
-      requestAccess: integer;
-      resourceNumber: integer;
-      access: integer;
-      fileType: integer;
-      auxType: longint;
-      storageType: integer;
-      createDateTime: timeField;
-      modDateTime: timeField;
-      optionList: optionListPtr;
-      dataEOF: longint;
-      blocksUsed: longint;
-      resourceEOF: longint;
-      resourceBlocks: longint;
-      end;
-      
-   readWriteOSDCB = record              {WriteGS DCB}
-      pcount: integer;
-      refNum: integer;
-      dataBuffer: ptr;
-      requestCount: longint;
-      transferCount: longint;
-      cachePriority: integer;
       end;
 
    expandDevicesDCBGS = record
@@ -340,7 +266,6 @@ var
    dateStr: longStringPtr;              {macro date string}
    doingCommandLine: boolean;           {are we processing the cc= command line?}
    doingDigitSequence: boolean;         {do we want a digit sequence (for #line)?}
-   doingEmbed: boolean;                 {doing #embed directive?}
    doingPPExpression: boolean;          {are we processing a preprocessor expression?}
    doingStringOrCharacter: boolean;     {used to suppress comments in strings}
    errors: array[1..maxErr] of errorType; {errors in this line}
@@ -362,7 +287,6 @@ var
    numErr: 0..maxErr;                   {number of errors in this line}
    oneStr: string[2];                   {string form of __STDC__, etc.}
    zeroStr: string[2];                  {string form of __STDC_HOSTED__ when not hosted}
-   twoStr: string[2];                   {string form of __STDC_EMBED_EMPTY__}
    ispstring: boolean;                  {is the current string a p-string?}
    saveNumber: boolean;                 {save the characters in a number?}
    skipping: boolean;                   {skipping tokens?}
@@ -380,29 +304,7 @@ var
    lintErrors: set of 1..maxLint;       {lint error codes}
    spaceStr: string[2];                 {string ' ' (used in stringization)}
    quoteStr: string[2];                 {string '"' (used in stringization)}
-   comma: char;                         {comma character (used for #embed)}
    numericConstants: set of tokenClass; {token classes for numeric constants}
-
-{---------------------------------------------------------------}
-
-                                        {GS memory manager}
-                                        {-----------------}
-
-procedure DisposeHandle (theHandle: handle); tool ($02, $10);
-
-function NewHandle (blockSize: longint; userID, memAttributes: integer;
-                    memLocation: ptr): handle; tool($02, $09);
-
-                                        {GS/OS calls}
-                                        {------------}
-
-procedure CloseGS (var parms: closeOSDCB); prodos ($2014);
-
-procedure GetFileInfoGS (var parms: getFileInfoOSDCB); prodos ($2006);
-
-procedure OpenGS (var parms: openOSDCB); prodos ($2010);
-
-procedure ReadGS (var parms: readWriteOSDCB); prodos ($2012);
 
 {-- External procedures; see expression evaluator for notes ----}
 
@@ -455,15 +357,7 @@ procedure FlagPragmas (pragma: pragmas); extern;
 {    1. From Header.pas						}
 
 
-function GetBitIntType (isUnsigned: boolean; width: integer): typePtr; extern;
-
-{ Get a _BitInt type of specified signedness and with           }
-{                                                               }
-{ Parameters:                                                   }
-{    isUnsigned - is the type unsigned?                         }
-{    width - width of type                                      }
-{                                                               }
-{ Returns: Pointer to the specified _BitInt type                }
+procedure GetFileInfoGS (var parms: getFileInfoOSDCB); prodos ($2006);
 
 
 procedure StartInclude (name: gsosOutStringPtr); extern;
@@ -507,12 +401,6 @@ function CnvULLX (val: longlong): extended; extern;
 {                                                               }
 { parameters:                                                   }
 {       val - the unsigned long long value                      }
-
-function ult (x,y: longint): integer; extern;
-
-{ unsigned 32-bit comparison                                    }
-
-procedure lshr64 (var x: longlong; y: integer); extern;
 
 {-- Scanner support --------------------------------------------}
 
@@ -576,6 +464,42 @@ if length(name) <> 0 then begin
 end; {AddPath}
 
 
+procedure AddLibPath (name: pString);
+
+{ Add a path to the library include search path list		}
+{								}
+{ parameters:							}
+{    name - path name to add					}
+
+var
+   pp, ppe: pathRecordPtr;		{work pointers}
+
+begin {AddLibPath}
+if length(name) <> 0 then begin
+   CheckDelimiters(name);		{make sure ':' is used}
+   if name[length(name)] <> ':' then	{make sure there is a trailing delimiter}
+      name := concat(name, ':');
+   pp := pathRecordPtr(GMalloc(sizeof(pathRecord)));
+   pp^.next := nil;
+   pp^.path := stringPtr(GMalloc(length(name)+1));
+   pp^.path^ := name;
+   if libPathList = nil then		{add the path to the lib path list}
+      libPathList := pp
+   else begin
+      ppe := libPathList;
+      while ppe^.next <> nil do
+         ppe := ppe^.next;
+      ppe^.next := pp;
+      end; {else}
+   end; {if}
+end; {AddLibPath}
+
+
+function Convertsl(var str: pString): longint; extern;
+
+{ Return the integer equivalent of the string.  Assumes a valid }
+{ 4-byte integer string; supports unsigned values.              }
+
 procedure Convertsll(var qval: longlong; var str: pString); extern;
 
 { Save the integer equivalent of the string to qval.  Assumes a }
@@ -625,7 +549,7 @@ bPtr := pointer(ord4(macros) + Hash(name));
 mPtr := bPtr^;
 while mPtr <> nil do begin
    if mPtr^.name^ = name^ then begin
-      if mPtr^.algorithm <> algPragma then {if not _Pragma pseudo-macro}
+      if mPtr^.algorithm <> 8 then      {if not _Pragma pseudo-macro}
          IsDefined := true;
       goto 1;
       end; {if}
@@ -806,7 +730,7 @@ if list or (numErr <> 0) then begin
          79: msg := @'illegal operand for the indirection operator';
          80: msg := @'the selection operator must be used on a structure or union';
          81: msg := @'the selected field does not exist in the structure or union';
-        {82: msg := @'''('', ''['' or ''*'' expected';}
+         82: msg := @'''('', ''['' or ''*'' expected';
          83: msg := @'string constant expected';
          84: msg := @'''dynamic'' expected';
          85: msg := @'the number of parameters does not agree with the prototype';
@@ -914,30 +838,6 @@ if list or (numErr <> 0) then begin
         187: msg := @'expression has incomplete struct or union type';
         188: msg := @'local variable used in asm statement is out of range for addressing mode';
         189: msg := @'malformed numeric constant';
-        190: msg := @'decimal floating types are not supported by ORCA/C';
-        191: msg := @'''['' expected';
-        192: msg := @'an attribute specifier cannot be used here';
-        193: msg := @'invalid standard attribute name';
-        194: msg := @'unbalanced '')'', ''}'', or '']''';
-        195: msg := @'character not representable in one code unit';
-        196: msg := @'#elif, #elifdef, or #elifndef after #else';
-        197: msg := @'type cannot be inferred';
-        198: msg := @'underspecified variable used in its own initializer';
-        199: msg := @'variable-length array type is not allowed here';
-        200: msg := @'variable-length array declarator using * is not allowed here';
-        201: msg := @'variably modified type is not allowed here';
-        202: msg := @'goto or switch enters scope of identifier with variably modified type';
-        203: msg := @'static rounding direction is not supported';
-        204: msg := @'error reading embedded file';
-        205: msg := @'duplicate #embed parameter';
-        206: msg := @'unknown #embed parameter';
-        207: msg := @'parameter list not prototyped';
-        208: msg := @'invalid _BitInt width';
-        209: msg := @'''{'' or '';'' expected';
-        210: msg := @'invalid underlying type for enum';
-        211: msg := @'invalid enum declaration';
-        212: msg := @'illegally nested enum declaration';
-        213: msg := @'incompatible redefinition of enum type or constant';
          end; {case}
        if extraStr <> nil then begin
           extraStr^ := concat(msg^,extraStr^);
@@ -1026,8 +926,12 @@ case token.kind of
    typedef,
    ident:            write(token.name^);
 
+   charconst,
+   scharconst,
+   ucharconst,
    intconst:         write(token.ival:1);
 
+   ushortconst,
    uintconst:        write(token.ival:1,'U');
 
    longConst:        write(token.lval:1,'L');
@@ -1094,18 +998,15 @@ case token.kind of
                      write('"');
                      end;
 
-   _Alignassy,_Alignofsy,_Atomicsy,_BitIntsy,_Boolsy,
-   _Complexsy,_Decimal128sy,_Decimal32sy,_Decimal64sy,_Genericsy,
-   _Imaginarysy,_Noreturnsy,_Static_assertsy,_Thread_localsy,alignassy,
-   alignofsy,autosy,asmsy,boolsy,breaksy,
-   casesy,charsy,continuesy,constsy,constexprsy,
-   compsy,defaultsy,dosy,doublesy,elsesy,
-   enumsy,externsy,extendedsy,falsesy,floatsy,
-   forsy,gotosy,ifsy,intsy,inlinesy,
-   longsy,nullptrsy,pascalsy,registersy,restrictsy,
-   returnsy,shortsy,sizeofsy,staticsy,static_assertsy,
-   structsy,switchsy,segmentsy,signedsy,thread_localsy,
-   truesy,typedefsy,typeofsy,typeof_unqualsy,unionsy,
+   _Alignassy,_Alignofsy,_Atomicsy,_Boolsy,_Complexsy,
+   _Genericsy,_Imaginarysy,_Noreturnsy,_Static_assertsy,_Thread_localsy,
+   autosy,asmsy,breaksy,casesy,charsy,
+   continuesy,constsy,compsy,defaultsy,dosy,
+   doublesy,elsesy,enumsy,externsy,extendedsy,
+   floatsy,forsy,gotosy,ifsy,intsy,
+   inlinesy,longsy,pascalsy,registersy,restrictsy,
+   returnsy,shortsy,sizeofsy,staticsy,structsy,
+   switchsy,segmentsy,signedsy,typedefsy,unionsy,
    unsignedsy,voidsy,volatilesy,whilesy:
                      write(reservedWords[token.kind]);
 
@@ -1227,8 +1128,6 @@ case token.kind of
                         write('%:%:');
 
    dotdotdotsy:      write('...');
-
-   coloncolonsy:     write('::');
    
    otherch:          write(token.ch);
    
@@ -1271,6 +1170,14 @@ function GetFileType (var name: pString): integer; forward;
 {								}
 { Returns: File type if the file exists, or -1 if the file does	}
 {    not exist (or if GetFileInfo returns an error)		}
+
+
+procedure ExpandPath (var name: pString); forward;
+
+{ Expands a name to a full pathname by resolving device prefixes	}
+{								}
+{ parameters:							}
+{    name - file name to expand					}
 
 
 function OpenFile (doInclude, default: boolean): boolean; forward;
@@ -1328,7 +1235,7 @@ FindMacro := nil;
 bPtr := pointer(ord4(macros)+Hash(name));
 mPtr := bPtr^;
 while mPtr <> nil do begin
-   if (mPtr^.name^ = name^) and (mPtr^.algorithm <> algPseudoMacro) then begin
+   if mPtr^.name^ = name^ then begin
       if mPtr^.parameters = -1 then
 	 FindMacro := mPtr
       else if tokenList = nil then begin
@@ -1704,11 +1611,7 @@ else if kind1 = colonch then begin
       tk1.kind := rbrackch;
       tk1.isDigraph := true;
       goto 1;
-      end {if}
-   else if (kind2 = colonch) and ((cStd >= c23) or not strictMode) then begin
-      tk1.kind := coloncolonsy;
-      goto 1;
-      end; {else if}
+      end; {if}
    end; {else if}
 
 Error(63);
@@ -1781,8 +1684,7 @@ if rawSourceCode then begin
    i := 1;
 1: while i <= len do begin
       ch := chr(cp^);
-                                        {handle trigraphs}
-      if (ch = '?') and (cStd < c23) then
+      if ch = '?' then                  {handle trigraphs}
          if i < len-1 then
             if chr(ptr(ord4(cp)+1)^) = '?' then
                if chr(ptr(ord4(cp)+2)^) in
@@ -2106,12 +2008,7 @@ if macro^.parameters >= 0 then begin    {find the values of the parameters}
          if token.kind = commach then begin
             NextToken;
             done := false;
-            end {if}
-         else if ((cStd >= c23) or not strictMode)
-            and macro^.isVarargs
-            and (token.kind = rparench)
-            and (paramCount = macro^.parameters - 1) then
-            done := false;
+            end; {if}
       until done;
       if paramCount = 1 then
          if macro^.parameters = 0 then
@@ -2135,17 +2032,15 @@ if macro^.parameters >= 0 then begin    {find the values of the parameters}
 if macro^.readOnly then begin           {handle special macros}
    case macro^.algorithm of
 
-      algLine: begin                    {__LINE__}
+      1: begin                          {__LINE__}
          if lineNumber <= maxint then begin
             token.kind := intconst;
             token.class := intconstant;
-            token.itype := intPtr;
             token.ival := ord(lineNumber);
             end {if}
          else begin
             token.kind := longconst;
             token.class := longconstant;
-            token.ltype := longPtr;
             token.lval := lineNumber;
             end; {else}
          token.numString := @lineStr;
@@ -2154,7 +2049,7 @@ if macro^.readOnly then begin           {handle special macros}
          tokenEnd := pointer(ord4(tokenStart)+length(lineStr));
          end;
 
-      algFile: begin                    {__FILE__}
+      2: begin                          {__FILE__}
          token.kind := stringConst;
          token.class := stringConstant;
          token.ispstring := false;
@@ -2169,7 +2064,7 @@ if macro^.readOnly then begin           {handle special macros}
          tokenEnd := pointer(ord4(tokenStart)+sp^.length);
          end;
 
-      algDate: begin                    {__DATE__}
+      3: begin                          {__DATE__}
          token.kind := stringConst;
          token.class := stringConstant;
          token.ispstring := false;
@@ -2180,7 +2075,7 @@ if macro^.readOnly then begin           {handle special macros}
          TermHeader;                    {Don't save stale value in sym file}
          end;                                   
 
-      algTime: begin                    {__TIME__}
+      4: begin                          {__TIME__}
          token.kind := stringConst;
          token.class := stringConstant;
          token.ispstring := false;
@@ -2191,18 +2086,17 @@ if macro^.readOnly then begin           {handle special macros}
          TermHeader;                    {Don't save stale value in sym file}
          end;
 
-      algOne: begin                     {__STDC__}
+      5: begin                          {__STDC__}
          token.kind := intConst;        {__ORCAC__}
          token.numString := @oneStr;    {__STDC_NO_...__}
          token.class := intConstant;    {__ORCAC_HAS_LONG_LONG__}
-         token.itype := intPtr;         {__STDC_EMBED_FOUND__}
          token.ival := 1;               {__STDC_UTF_16__}
          oneStr := '1';                 {__STDC_UTF_32__}
          tokenStart := @oneStr[1];
          tokenEnd := pointer(ord4(tokenStart)+1);
          end;
 
-      algVersion: begin                 {__VERSION__}
+      6: begin                          {__VERSION__}
          token.kind := stringConst;
          token.class := stringConstant;
          token.ispstring := false;
@@ -2212,13 +2106,12 @@ if macro^.readOnly then begin           {handle special macros}
          tokenEnd := pointer(ord4(tokenStart)+versionStrL^.length);
          end;
 
-      algHosted: begin                  {__STDC_HOSTED__}
+      7: begin                          {__STDC_HOSTED__}
          if isNewDeskAcc or isClassicDeskAcc or isCDev or isNBA or isXCMD then
          begin
             token.kind := intConst;
             token.numString := @zeroStr;
             token.class := intConstant;
-            token.itype := intPtr;
             token.ival := 0;
             zeroStr := '0';
             tokenStart := @zeroStr[1];
@@ -2228,7 +2121,6 @@ if macro^.readOnly then begin           {handle special macros}
             token.kind := intConst;
             token.numString := @oneStr;
             token.class := intConstant;
-            token.itype := intPtr;
             token.ival := 1;
             oneStr := '1';
             tokenStart := @oneStr[1];
@@ -2236,10 +2128,9 @@ if macro^.readOnly then begin           {handle special macros}
             end {else}
          end;
 
-      algStdcVersion: begin             {__STDC_VERSION__}
+      9: begin                          {__STDC_VERSION__}
          token.kind := longconst;
          token.class := longconstant;
-         token.ltype := longPtr;
          token.lval := stdcVersion[cStd];
          token.numString := @stdcVersionStr;
          stdcVersionStr := concat(cnvis(token.lval),'L');
@@ -2247,42 +2138,22 @@ if macro^.readOnly then begin           {handle special macros}
          tokenEnd := pointer(ord4(tokenStart)+length(stdcVersionStr));
          end;
 
-      algZero: begin                    {__STDC_EMBED_NOT_FOUND__}
-         token.kind := intConst;
-         token.numString := @zeroStr;
-         token.class := intConstant;
-         token.itype := intPtr;
-         token.ival := 0;
-         zeroStr := '0';
-         tokenStart := @zeroStr[1];
-         tokenEnd := pointer(ord4(tokenStart)+1);
-         end;
-
-      algTwo: begin                     {__STDC_EMBED_EMPTY__}
-         token.kind := intConst;
-         token.numString := @twoStr;
-         token.class := intConstant;
-         token.itype := intPtr;
-         token.ival := 2;
-         twoStr := '2';
-         tokenStart := @twoStr[1];
-         tokenEnd := pointer(ord4(tokenStart)+1);
-         end;
-
-      algPragma: begin                  {_Pragma pseudo-macro}
-         if (parms <> nil) and (parms^.tokens <> nil)
-            and (parms^.tokens^.token.kind = stringconst)
-            and (parms^.tokens^.next = nil) then
-            Do_Pragma(parms^.tokens^.token)
+      8: begin                          {_Pragma pseudo-macro}
+         if (parms <> nil) and (parms^.tokens <> nil) then begin
+            if (parms^.tokens^.token.kind = stringconst)
+               and (parms^.tokens^.next = nil) then
+               Do_Pragma(parms^.tokens^.token)
+            else
+               Error(179);
+            end {if}
          else
             Error(179);
          end;
 
-      algPseudoMacro,
       otherwise: Error(57);
 
       end; {case}
-   if macro^.algorithm <> algPragma then {if not _Pragma}
+   if macro^.algorithm <> 8 then        {if not _Pragma}
       PutBackToken(token, true, false);
    end {if}
 else begin
@@ -2364,8 +2235,9 @@ else begin
                      if not tcPtr^.expandEnabled then
                         inhibit := true;
                      if tcPtr = pptr^.tokens then
-                        if (mPtr <> nil) and (mPtr^.parameters >= 0) then
-                           inhibit := true;
+                        if mPtr <> nil then
+                           if mPtr^.parameters >= 0 then
+                              inhibit := true;
                      if (mPtr <> nil) and (not inhibit) then
                         Expand(mPtr)
                      else begin
@@ -2415,14 +2287,12 @@ saveNumber := false;                    {stop saving numeric strings}
 end; {Expand}
 
 
-function GetFileName (mustExist, requireSrc, requireEOL: boolean): boolean;
+function GetFileName (mustExist: boolean): boolean;
 
 { Read a file name from a directive line			}
 {								}
 { parameters:							}
 {    mustExist - should we look for an existing file?		}
-{    requireSrc - must the file have SRC file type?		}
-{    requireEOL - must the file name be followed by EOL?	}
 {								}
 { Returns true if successful, false if not.			}
 {								}
@@ -2476,18 +2346,32 @@ var
 
    var
       lname: pString;			{local copy of name}
-      fileType: integer;                {file type}
+      pp: pathRecordPtr;		{used to trace the lib path list}
+      found: boolean;			{found in lib path?}
 
    begin {GetLibraryName}
-   lname := concat('13:ORCACDefs:', name);
-   Expand(lname);
-   fileType := GetFileType(lname);
-   if (fileType = SRC) or (not requireSrc and (fileType <> -1)) then begin
-      name := lname;
-      GetLibraryName := true;
-      end {if}
-   else
-      GetLibraryName := false;
+   found := false;
+   pp := libPathList;			{check user lib paths first}
+   while pp <> nil do begin
+      lname := concat(pp^.path^, name);
+      Expand(lname);
+      if GetFileType(lname) = SRC then begin
+         found := true;
+         name := lname;
+         pp := nil;
+         end {if}
+      else
+         pp := pp^.next;
+      end; {while}
+   if not found then begin		{fall back to system ORCACDefs}
+      lname := concat('13:ORCACDefs:', name);
+      Expand(lname);
+      if GetFileType(lname) = SRC then begin
+         name := lname;
+         found := true;
+         end; {if}
+      end; {if}
+   GetLibraryName := found;
    end; {GetLibraryName}
 
 
@@ -2503,13 +2387,11 @@ var
    var
       lname: pstring;			{work string}
       pp: pathRecordPtr;		{used to trace the path list}
-      fileType: integer;                {file type}
 
    begin {GetLocalName}
    lname := name;
    Expand(lname);
-   fileType := GetFileType(lname);
-   if (fileType = SRC) or (not requireSrc and (fileType <> -1)) then begin
+   if GetFileType(lname) = SRC then begin
       GetLocalName := true;
       name := lname;
       end {if}
@@ -2518,8 +2400,7 @@ var
       pp := pathList;
       while pp <> nil do begin
          lname := concat(pp^.path^, name);
-         fileType := GetFileType(lname);
-         if (fileType = SRC) or (not requireSrc and (fileType <> -1)) then begin
+         if GetFileType(lname) = SRC then begin
             GetLocalName := true;
             name := lname;
             Expand(name);
@@ -2652,12 +2533,11 @@ else begin
    end; {else}
 while charKinds[ord(ch)] = ch_white	{finish processing the current line}
    do NextCh;
-if requireEOL then
-   if charKinds[ord(ch)] <> ch_eol then	{check for extra stuff on the line}
-      begin
-      Error(11);
-      GetFileName := false;
-      end; {if}
+if charKinds[ord(ch)] <> ch_eol then	{check for extra stuff on the line}
+   begin
+   Error(11);
+   GetFileName := false;
+   end; {if}
 gettingFileName := false;		{not in GetFileName}
 end; {GetFileName}
 
@@ -2689,6 +2569,35 @@ else
 end; {GetFileType}
 
 
+procedure ExpandPath {var name: pString};
+
+{ Expands a name to a full pathname by resolving device prefixes	}
+{								}
+{ parameters:							}
+{    name - file name to expand					}
+
+var
+   exRec: expandDevicesDCBGS;	{expand devices}
+
+begin {ExpandPath}
+exRec.pcount := 2;
+new(exRec.inName);
+exRec.inName^.theString := name;
+exRec.inName^.size := length(name);
+new(exRec.outName);
+exRec.outName^.maxSize := maxPath+4;
+ExpandDevicesGS(exRec);
+if toolerror = 0 then
+   with exRec.outName^.theString do begin
+      if size < maxPath then
+         theString[size+1] := chr(0);
+      name := theString;
+      end; {with}
+dispose(exRec.inName);
+dispose(exRec.outName);
+end; {ExpandPath}
+
+
 function OpenFile {doInclude, default: boolean): boolean};
 
 { Open a new file and start scanning it				}
@@ -2706,12 +2615,14 @@ begin {OpenFile}
 if default then begin			{get the file name}
    if customDefaultName <> nil then
       workString := customDefaultName^
-   else
+   else begin
       workString := defaultName;
+      ExpandPath(workString);		{resolve device prefix for defaults.h}
+      end; {else}
    gotName := true;
    end {if}
 else
-   gotName := GetFileName(true, true, true);
+   gotName := GetFileName(true);
 
 if gotName then begin			{read the file name from the line}
    OpenFile := true;			{we opened it}
@@ -2754,419 +2665,6 @@ if gotName then begin			{read the file name from the line}
 else
    OpenFile := false;			{we failed to opened it}
 end; {OpenFile}
-
-
-function HasInclude{: boolean};
-
-{ Parse an include file name and check if the file exists.      }
-{                                                               }
-{ Returns: true if a valid include file exists, false otherwise }
-
-const
-   SRC = $B0;                           {source file type}
-
-begin {HasInclude}
-if GetFileName(true, true, false) then
-   HasInclude := GetFileType(workString) = SRC
-else
-   HasInclude := false;
-end; {HasInclude}
-
-
-function DoEmbed {doingHashEmbed: boolean): integer};
-
-{ #embed NAME pp-tokens(opt)                                    }
-{ __has_embed ( NAME pp-tokens(opt) )                           }
-{                                                               }
-{ parameter:                                                    }
-{     doingHashEmbed - true for #embed, false for __has_embed   }
-
-label 1;
-
-const
-   eofEncountered = $4C;                {GS/OS error code}
-
-var
-   haveFile: boolean;
-   pathname: gsosInString;              {GS/OS style name}
-   giRec: getFileInfoOSDCB;             {GetFileInfo record}
-   opRec: openOSDCB;                    {OpenGS record}
-   rdRec: readWriteOSDCB;               {ReadGS record}
-   clRec: closeOSDCB;                   {CloseGS record}
-   readSize: longint;                   {size of data to be read from file}
-   bufHandle: handle;                   {buffer to hold data read from file}
-   dataPtr: ptr;                        {work pointer into data buffer}
-   i: longint;                          {index variable}
-   ch: byte;                            {value of a byte read from file}
-   prefix: tokenListRecordPtr;          {tokens from prefix parameter}
-   suffix: tokenListRecordPtr;          {tokens from suffix parameter}
-   ifEmpty: tokenListRecordPtr;         {tokens from if_empty parameter}
-   limit: longint;                      {value from limit parameter}
-   numString: packed array [0..3] of char; {string for one byte value}
-
-
-   procedure DisposeTokens(tokens: tokenListRecordPtr);
-
-   { Dispose a token sequence                                   }
-
-   var
-      tTokens: tokenListRecordPtr;
-   
-   begin {DisposeTokens}
-   while tokens <> nil do begin
-      tTokens := tokens^.next;
-      dispose(tokens);
-      tokens := tTokens;
-      end; {while}
-   end; {DisposeTokens}
-
-
-   procedure EmbedParameters;
-   
-   { handle embed parameters                                    }
-   
-   var 
-      prefixName: stringPtr;
-      paramName: stringPtr;
-      hasArguments: boolean;
-      tokens: tokenListRecordPtr;
-      hasPrefix,hasSuffix,hasIfEmpty,hasLimit: boolean;
-   
-      procedure MakeIdentToken;
-      
-      { Make token into an ident token.  It must be an identifier,      }
-      { typedef name, or reserved word to begin with.                   }
-      
-      begin {MakeIdentToken}
-      if token.class = reservedWord then begin
-         token.name := @reservedWords[token.kind];
-         token.kind := ident;
-         token.class := identifier;
-         end {if}
-      else if token.kind = typedef then
-         token.kind := ident;
-      end; {MakeIdentToken}
-   
-   
-      function BalancedTokens: tokenListRecordPtr;
-      
-      { Parse a balanced token sequence (where all parentheses, }
-      { brackets, and braces are balanced and properly nested). }
-      { The sequence ends with an unmatched ).                  }
-   
-      type
-         delimiterRecPtr = ^delimiterRec;
-         delimiterRec = record
-            endToken: tokenEnum;
-            next: delimiterRecPtr;
-            end;
-   
-      var
-         nestedDelimiters: delimiterRecPtr; {stack of nested delimiters}
-         tDelimiters: delimiterRecPtr;  {work pointer}
-         done: boolean;                 {done with loop?}
-         tokens: tokenListRecordPtr;    {the tokens found}
-         tTokens: tokenListRecordPtr;   {work pointer}
-   
-      begin {BalancedTokens}
-      nestedDelimiters := nil;
-      tokens := nil;
-      done := false;
-      repeat
-         if token.kind in [lparench,lbracech,lbrackch] then begin
-            new(tDelimiters);
-            tDelimiters^.next := nestedDelimiters;
-            case token.kind of
-               lparench: tDelimiters^.endToken := rparench;
-               lbracech: tDelimiters^.endToken := rbracech;
-               lbrackch: tDelimiters^.endToken := rbrackch;
-               end; {case}
-            nestedDelimiters := tDelimiters;
-            end {if}
-         else if token.kind in [rparench,rbracech,rbrackch] then begin
-            if nestedDelimiters = nil then begin
-               if token.kind <> rparench then
-                  Error(194);
-               done := true;
-               end {if}
-            else if nestedDelimiters^.endToken = token.kind then begin
-               tDelimiters := nestedDelimiters;
-               nestedDelimiters := nestedDelimiters^.next;
-               dispose(tDelimiters);
-               end {if}
-            else
-               Error(194);
-            end; {else if}
-         if not done then begin
-            new(tTokens);
-            tTokens^.next := tokens;
-            tTokens^.token := token;
-            tTokens^.tokenStart := tokenStart;
-            tTokens^.tokenEnd := tokenEnd;
-            tokens := tTokens;
-            NextToken;
-            end; {if}
-      until done or (token.kind = eofsy);
-      while nestedDelimiters <> nil do begin
-         tDelimiters := nestedDelimiters;
-         nestedDelimiters := nestedDelimiters^.next;
-         dispose(tDelimiters);      
-         end; {while}
-      BalancedTokens := tokens;
-      end; {BalancedTokens}
-   
-   
-      procedure TokensParameter(var tokens: tokenListRecordPtr);
-
-      { Process a parameter that takes a token sequence argument        }
-
-      begin {TokensParameter}
-      if hasArguments then begin
-         NextToken;
-         tokens := BalancedTokens;
-         NextToken;
-         end {if}
-      else begin
-         tokens := nil;
-         Error(13);
-         end; {else}
-      end; {TokensParameter}
-   
-   
-      procedure NumericParameter(var value: longint);
-
-      { Process a parameter that takes a numeric argument               }
-      
-      begin {NumericParameter}
-      if hasArguments then begin
-         prohibitDefined := true;
-         NextToken;
-         Expression(preprocessorExpression, [eolsy]);
-         value := expressionValue; {TODO adjustments}
-         if value < 0 then
-            if expressionType^.kind = scalarType then
-               if not (expressionType^.baseType in [cgULong,cgUQuad]) then
-                  Error(98);
-         prohibitDefined := false;
-         NextToken;
-         end {if}
-      else begin
-         value := 0;
-         Error(13);
-         end; {else}
-      end; {NumericParameter}
-   
-   
-      procedure UnknownParameter;
-
-      { Process an unknown parameter                                    }
-   
-      var
-         tokens: tokenListRecordPtr;
-      
-      begin {UnknownParameter}
-      if doingHashEmbed then
-         Error(206);
-      haveFile := false;
-      if hasArguments then begin
-         TokensParameter(tokens);
-         DisposeTokens(tokens);
-         end; {if}
-      end; {UnknownParameter}
-   
-   begin {EmbedParameters}
-   hasPrefix := false;
-   hasSuffix := false;
-   hasIfEmpty := false;
-   hasLimit := false;
-   
-   while token.class in [reservedWord,identifier] do begin
-      MakeIdentToken;
-      prefixName := nil;
-      new(paramName);
-      paramName^ := token.name^;
-      NextToken;
-   
-      if token.kind = coloncolonsy then begin
-         NextToken;
-         if token.class in [reservedWord,identifier] then begin
-            MakeIdentToken;
-            prefixName := paramName;
-            new(paramName);
-            paramName^ := token.name^;
-            NextToken;
-            end {if}
-         else
-            Error(9);
-         end; {if}
-   
-      hasArguments := token.kind = lparench;
-   
-      if prefixName = nil then begin
-         if ((paramName^ = 'if_empty') or (paramName^ = '__if_empty__'))
-            then begin
-            if hasIfEmpty then
-               Error(205);
-            hasIfEmpty := true;
-            TokensParameter(ifEmpty);
-            end {if}
-         else if ((paramName^ = 'prefix') or (paramName^ = '__prefix__')) 
-            then begin
-            if hasPrefix then
-               Error(205);
-            hasPrefix := true;
-            TokensParameter(prefix);
-            end {else if}
-         else if ((paramName^ = 'suffix') or (paramName^ = '__suffix__'))
-            then begin
-            if hasSuffix then
-               Error(205);
-            hasSuffix := true;
-            TokensParameter(suffix);
-            end {else if}
-         else if ((paramName^ = 'limit') or (paramName^ = '__limit__'))
-            then begin
-            if hasLimit then
-               Error(205);
-            hasLimit := true;
-            NumericParameter(limit);
-            end {else if}
-         else
-            UnknownParameter;
-         end {if}
-      else
-         UnknownParameter; {else}
-
-      dispose(paramName);
-      if prefixName <> nil then
-         dispose(prefixName);
-      end; {while}
-   end; {EmbedParameters}
-
-
-   procedure EmbedTokens(tokens: tokenListRecordPtr);
-
-   { Insert a token sequence into the token stream              }
-   
-   begin {EmbedTokens}
-   while tokens <> nil do begin
-      if token.kind <> eolsy then
-         PutBackToken(token, false, false);
-      token := tokens^.token;
-      tokenStart := tokens^.tokenStart;
-      tokenEnd := tokens^.tokenEnd;
-      tokens := tokens^.next;
-      end; {while}
-   end; {EmbedTokens}
-
-begin {DoEmbed}
-prefix := nil;
-suffix := nil;
-ifEmpty := nil;
-limit := -1;
-
-haveFile := GetFileName(true, false, false); {get file name}
-pathname.theString := workString;
-pathname.size := length(workString);
-NextToken;
-EmbedParameters;                     {process embed parameters}
-if doingHashEmbed then begin
-   if token.kind <> eolsy then       {check for extra stuff on the line}
-      Error(11);
-   end; {if}
-
-if haveFile then begin
-   giRec.pcount := 9;                {get file length}
-   giRec.pathName := @pathname;
-   giRec.optionList := nil;
-   GetFileInfoGS(giRec);
-   if toolerror <> 0 then
-      haveFile := false
-   else
-      if ult(giRec.dataEOF, limit) <> 0 then
-         readSize := giRec.dataEOF
-      else
-         readSize := limit;
-
-   if doingHashEmbed then begin      {embed the data}
-      if readSize <> 0 then begin
-         bufHandle := NewHandle(readSize, UserID, $C000, nil);
-         if toolerror <> 0 then
-            TermError(5);
-         opRec.pCount := 3;
-         opRec.pathname := @pathname;
-         opRec.requestAccess := 1;
-         OpenGS(opRec);
-         if toolerror <> 0 then begin
-            haveFile := false;
-            goto 1;
-            end; {if}
-         rdRec.pCount := 4;
-         rdRec.refNum := opRec.refNum;
-         rdRec.dataBuffer := bufHandle^;
-         rdRec.requestCount := readSize;
-         ReadGS(rdRec);
-         if (toolerror <> 0) and (toolError <> eofEncountered) then
-            haveFile := false;
-         readSize := rdRec.transferCount;
-         clRec.pCount := 1;
-         clRec.refnum := opRec.refNum;
-         CloseGS(clRec);
-
-         if haveFile and (readSize <> 0) then begin
-            EmbedTokens(suffix);
-            i := readSize - 1;
-            while i >= 0 do begin
-               dataPtr := pointer(ord4(bufHandle^) + i);
-               ch := dataPtr^;
-               if token.kind <> eolsy then
-                  PutBackToken(token, false, false);
-               token.kind := intconst;
-               token.class := intConstant;
-               token.itype := intPtr;
-               token.ival := ch;
-               if saveNumber then begin
-                  numString := cnvis(ch);
-                  token.numString := pointer(GMalloc(length(numString)+1));
-                  CopyString(token.numString, @numString);
-                  tokenStart := @token.numString^[1];
-                  tokenEnd := pointer(
-                     ord4(@token.numString^[length(token.numString^)]) + 1);
-                  end {if}
-               else
-                  token.numString := nil;
-               if i <> 0 then begin
-                  PutBackToken(token, false, false);
-                  token.kind := commach;
-                  token.class := reservedSymbol;
-                  tokenStart := @comma;
-                  tokenEnd := pointer(ord4(@comma) + 1);
-                  end; {if}
-               i := i - 1;
-               end; {while}
-            EmbedTokens(prefix);
-            end {if}
-         else
-            EmbedTokens(ifEmpty);
-
-1:       DisposeHandle(bufHandle);
-         end {if}
-      else
-         EmbedTokens(ifEmpty);
-      end; {if}
-   end; {if}
-
-DisposeTokens(prefix);
-DisposeTokens(suffix);
-DisposeTokens(ifEmpty);
-
-if not haveFile then
-   DoEmbed := embedNotFound
-else if readSize = 0 then
-   DoEmbed := embedEmpty
-else
-   DoEmbed := embedFound;
-end; {DoEmbed}
 
 
 procedure PreProcess;
@@ -3532,7 +3030,7 @@ var
             if tPtr^.next <> nil then
                Error(172);
       mPtr^.readOnly := false;
-      mPtr^.algorithm := algNone;
+      mPtr^.algorithm := 0;
       if IsDefined(mPtr^.name) then begin
          mf := macroFound;
          if mf^.readOnly then
@@ -3626,8 +3124,6 @@ var
    begin {DoElif}
    ip := ifList;
    if (ip <> nil) and (ip^.theFile = fileList) then begin
-      if ip^.elseFound then             {check for elif after else}
-         Error(196);
                                         {decide if we should be skipping}
       tSkipping := ip^.status <> skippingToElse;
       if tSkipping then
@@ -3647,43 +3143,6 @@ var
    else
       Error(20);
    end; {DoElif}
-
-
-   procedure DoElifdef (trueCondition: boolean);
- 
-   { #elifdef expression                                         }
-   { #elifndef expression                                        }
-   {                                                             }
-   { parameter:                                                  }
-   {     trueCondition - true for elifdef, false for elifndef    }
- 
-   var
-      ip: ifPtr;                        {temp; for efficiency}
-      macroDefined: boolean;            {is the macro defined?}
-
-   begin {DoElifdef}
-   ip := ifList;
-   if (ip <> nil) and (ip^.theFile = fileList) then begin
-      if ip^.elseFound then             {check for elifdef/elifndef after else}
-         Error(196);
-                                        {decide if we should be skipping}
-      tSkipping := ip^.status <> skippingToElse;
-      if tSkipping then
-         ip^.status := skippingToEndif
-      else begin
-         macroDefined := Defined;       {check if macro is defined}
-         if token.kind <> eolsy then    {check for extra stuff on the line}
-            Error(11);
-         if macroDefined <> trueCondition then
-            ip^.status := skippingToElse
-         else
-            ip^.status := processing;
-         tSkipping := ip^.status <> processing; {decide if we should be skipping}
-         end; {else}
-      end
-   else
-      Error(20);
-   end; {DoElifdef}
 
 
    procedure DoElse;
@@ -3794,13 +3253,13 @@ var
    begin {DoFloat}
    FlagPragmas(p_float);
    NextToken;
-   if token.kind in [intconst,uintconst] then begin
+   if token.kind in [intconst,uintconst,ushortconst] then begin
       floatCard := token.ival;
       NextToken;
       end {if}
    else
       Error(18);
-   if token.kind in [intconst,uintconst] then begin
+   if token.kind in [intconst,uintconst,ushortconst] then begin
       floatSlot := token.ival;
       NextToken;
       end {if}
@@ -3816,7 +3275,7 @@ var
    { #pragma keep FILENAME                                      }
 
    begin {DoKeep}
-   if GetFileName(false, false, true) then begin {read the file name}
+   if GetFileName(false) then begin	{read the file name}
       FlagPragmas(p_keep);
       if not ignoreSymbols then
          if pragmaKeepFile = nil then begin
@@ -3879,7 +3338,7 @@ var
          NextToken;
          isNegative := true;
          end; {else if}
-      if token.kind in [intconst,uintconst] then begin
+      if token.kind in [intconst,uintconst,ushortconst] then begin
 	 value := token.ival;
 	 NextToken;
 	 end {if}
@@ -4021,7 +3480,6 @@ var
 
 begin {PreProcess}
 preprocessing := true;
-doingEmbed := false;
 lSuppressMacroExpansions := suppressMacroExpansions; {inhibit token printing}
 suppressMacroExpansions := true;
 lReportEOL := reportEOL;                {we need to see eol's}
@@ -4073,30 +3531,9 @@ if ch in ['a','d','e','i','l','p','u','w'] then begin
                   DoElif;
                   goto 2;
                   end {else if}
-               else if token.name^ = 'elifdef' then begin
-                  if (cStd >= c23) or not strictMode then begin
-                     DoElifdef(true);
-                     goto 2;
-                     end; {if}
-                  end {else if}
-               else if token.name^ = 'elifndef' then begin
-                  if (cStd >= c23) or not strictMode then begin
-                     DoElifdef(false);
-                     goto 2;
-                     end; {if}
-                  end {else if}
                else if token.name^ = 'error' then begin
                   if tskipping then goto 2;
                   DoError(true);
-                  goto 2;
-                  end {else if}
-               else if (token.name^ = 'embed')
-                  and ((cStd >= c23) or not strictMode) then begin
-                  if tskipping then goto 2;
-                  if DoEmbed(true) = embedNotFound then
-                     Error(204);
-                  if token.kind <> eolsy then
-                     doingEmbed := true;
                   goto 2;
                   end; {else if}
             'i':
@@ -4277,7 +3714,6 @@ if ch in ['a','d','e','i','l','p','u','w'] then begin
                      val := long(expressionValue).lsw;
                      extendedKeywords := odd(val);
                      extendedParameters := odd(val >> 1);
-                     SetKeywordMask;
                      if token.kind <> eolsy then
                         Error(11);
                      end {else if}
@@ -4333,7 +3769,14 @@ if ch in ['a','d','e','i','l','p','u','w'] then begin
                      end {else if}
                   else if token.name^ = 'noroot' then begin
 		     FlagPragmas(p_noroot);
-                     noroot := true;   
+                     noroot := true;
+                     NextToken;
+                     if token.kind <> eolsy then
+                        Error(11);
+                     end {else if}
+                  else if token.name^ = 'gnostartup' then begin
+		     FlagPragmas(p_gnostartup);
+                     gnoStartup := true;
                      NextToken;
                      if token.kind <> eolsy then
                         Error(11);
@@ -4357,6 +3800,19 @@ if ch in ['a','d','e','i','l','p','u','w'] then begin
                      if token.kind <> eolsy then
                         Error(11);
                      end {else if}
+                  else if token.name^ = 'libpath' then begin
+                     FlagPragmas(p_libpath);
+                     NextToken;
+                     if token.kind = stringConst then begin
+                        LongToPString(workString, token.sval);
+                        AddLibPath(workString);
+                        NextToken;
+                        end {if}
+                     else
+                        Error(83);
+                     if token.kind <> eolsy then
+                        Error(11);
+                     end {else if}
                   else if token.name^ = 'ignore' then begin
                      { ignore bits:                                        }
                      {     1 - don't flag illegal tokens in skipped source }
@@ -4365,7 +3821,6 @@ if ch in ['a','d','e','i','l','p','u','w'] then begin
                      {     8 - allow // comments                           }
                      {    16 - allow mixed decls & use C99 scope rules     }
                      {    32 - loosen some standard type checks            }
-                     {    64 - loosen C23 rules requiring prototypes       }
                      FlagPragmas(p_ignore);
                      NumericDirective;
                      if expressionType^.kind = scalarType then
@@ -4378,7 +3833,6 @@ if ch in ['a','d','e','i','l','p','u','w'] then begin
                      allowSlashSlashComments := odd(val >> 3);
                      allowMixedDeclarations := odd(val >> 4);
                      looseTypeChecks := odd(val >> 5);
-                     strictC23Prototypes := not odd(val >> 5) and (cStd >= c23);
                      if allowMixedDeclarations <> c99Scope then begin
                         if doingFunction then
                            Error(126)
@@ -4402,22 +3856,7 @@ if ch in ['a','d','e','i','l','p','u','w'] then begin
                         if fenvAccess then
                            if doingFunction then
                               fenvAccessInFunction := true;
-                        end {else if}
-                     else if (token.name^ = 'FENV_ROUND')
-                        and ((cStd >= c23) or not strictMode) then begin
-                        NextToken;
-                        if token.kind = typedef then
-                           token.kind := ident;
-                        if token.kind <> ident then
-                           Error(9)
-                        else if token.name^ <> 'FE_DYNAMIC' then
-                           Error(203);
-                        if token.kind <> eolsy then begin
-                           NextToken;
-                           if token.kind <> eolsy then
-                              Error(11);
-                           end; {if}
-                        end {else if}
+                        end
                      else
                         Error(157);
                      expandMacros := true;
@@ -4456,9 +3895,8 @@ if not tSkipping then
 expandMacros := false;                  {skip to the end of the line}
 flagOverflows := false;
 skipping := tSkipping;
-if not doingEmbed then
-   while not (token.kind in [eolsy,eofsy]) do
-      NextToken;
+while not (token.kind in [eolsy,eofsy]) do
+   NextToken;
 flagOverflows := true;
 expandMacros := true;
 reportEOL := lReportEOL;                {restore flags}
@@ -4480,6 +3918,7 @@ var
 
 begin {DoDefaultsDotH}
 name := defaultName;
+ExpandPath(name);			{resolve device prefix in path}
 if (customDefaultName <> nil) or (GetFileType(name) <> -1) then
    DoInclude(true);
 end; {DoDefaultsDotH}
@@ -4492,12 +3931,14 @@ procedure Error {err: integer};
 { err - error number                                            }
 
 begin {Error}
-if lintIsError or not (err in lintErrors)
-   then begin
+if not (err in lintErrors) then begin
    if (numErr <> maxErr) or (numErrors = 0) then
       numErrors := numErrors+1;
    liDCBGS.merrf := 16;
    end {if}
+else if lintIsError then begin
+   numLintErrors := numLintErrors + 1;
+   end {else if}
 else
    TermHeader;
 if numErr = maxErr then                 {set the error number}
@@ -4565,7 +4006,6 @@ var
    isHex: boolean;                      {is the value a hex number?}
    isLong: boolean;                     {is the value a long number?}
    isLongLong: boolean;                 {is the value a long long number?}
-   isBitInt: boolean;                   {is the value a _BitInt number?}
    isFloat: boolean;                    {is the value a number of type float?}
    isReal: boolean;                     {is the value a real number?}
    numIndex: 0..maxLine;                {index into workString}
@@ -4648,27 +4088,7 @@ var
       end; {while}
    token.qval.lo := token.qval.lo | nextDigit;
    end; {ShiftAndOrValue}
-
-
-   function BitWidth (val: longlong): integer;
    
-   {  Get the number of bits needed to represent val            }
-   {  (interpreted as an unsigned integer).                     }
-
-   var
-      width: integer;
-      remainingBits: longlong;
-
-   begin {BitWidth}
-   width := 0;
-   remainingBits := val;
-   repeat
-      width := width + 1;
-      lshr64(remainingBits, 1);
-   until (remainingBits.hi = 0) and (remainingBits.lo = 0);
-   BitWidth := width;
-   end; {BitWidth}
-
 
 begin {DoNumber}
 atEnd := false;                         {not at end}
@@ -4677,7 +4097,6 @@ isHex := false;                         {assume it's not hex}
 isReal := false;                        {assume it's an integer}
 isLong := false;                        {assume a short integer}
 isLongLong := false;
-isBitInt := false;
 isFloat := false;
 unsigned := false;                      {assume signed numbers}
 err := 0;                               {no error so far}
@@ -4743,9 +4162,9 @@ if (not isHex and (c2 in ['e','E']))    {handle an exponent}
       end; {else}
    end; {if}
 1:
-while c2 in ['l','u','w','L','U','W'] do {check for long, unsigned, or _BitInt}
+while c2 in ['l','u','L','U'] do        {check for long or unsigned}
    if c2 in ['l','L'] then begin   
-      if isLong or isLongLong or isBitInt then
+      if isLong or isLongLong then
          FlagError(156);
       c1 := c2;
       NextChar;
@@ -4758,27 +4177,14 @@ while c2 in ['l','u','w','L','U','W'] do {check for long, unsigned, or _BitInt}
       else
          isLong := true;
       end {if}
-   else if c2 in ['u','U'] then begin
+   else {if c2 in ['u','U'] then} begin
       NextChar;
       if unsigned then
          FlagError(156)
       else if isReal then
          FlagError(91);
       unsigned := true;
-      end {else if}
-   else if c2 in ['w','W'] then begin
-      c1 := c2;
-      NextChar;
-      if ((cStd >= c23) or not strictMode) and
-         (((c1 = 'w') and (c2 = 'b')) or ((c1 = 'W') and (c2 = 'B'))) then begin
-         NextChar;
-         if isLong or isLongLong or isReal or isBitInt then
-            FlagError(156);
-         isBitInt := true;
-         end {if}
-      else
-         FlagError(189);
-      end; {else if}
+      end; {else}
 if c2 in ['f','F'] then begin           {allow F designator on reals}
    if not isReal then begin
       FlagError(100);
@@ -4810,162 +4216,135 @@ if isReal then begin                    {convert a real constant}
    else
       token.rval := cnvsd(numString);
    end {if}
-else begin
-   if numString[1] <> '0' then begin    {convert a decimal integer}
-      if (stringIndex > 5)
-         or (not unsigned and (stringIndex = 5) and (numString > '32767'))
-         or (unsigned and (stringIndex = 5) and (numString > '65535')) then
-         isLong := true;
-      if (stringIndex > 10)
-         or (not unsigned and (stringIndex = 10) and (numString > '2147483647'))
-         or (unsigned and (stringIndex = 10) and (numString > '4294967295')) then
-         isLongLong := true;
-      if (not unsigned and ((stringIndex > 19) or
-         ((stringIndex = 19) and (numString > '9223372036854775807')))) or
-         (unsigned and ((stringIndex > 20) or
-         ((stringIndex = 20) and (numString > '18446744073709551615')))) then begin
-         numString := '0';
-         if flagOverflows then
-            FlagError(6);
-         end; {if}
+else if numString[1] <> '0' then begin {convert a decimal integer}
+   if (stringIndex > 5)
+      or (not unsigned and (stringIndex = 5) and (numString > '32767'))
+      or (unsigned and (stringIndex = 5) and (numString > '65535')) then
+      isLong := true;
+   if (stringIndex > 10)
+      or (not unsigned and (stringIndex = 10) and (numString > '2147483647'))
+      or (unsigned and (stringIndex = 10) and (numString > '4294967295')) then
+      isLongLong := true;
+   if (not unsigned and ((stringIndex > 19) or
+      ((stringIndex = 19) and (numString > '9223372036854775807')))) or
+      (unsigned and ((stringIndex > 20) or
+      ((stringIndex = 20) and (numString > '18446744073709551615')))) then begin
+      numString := '0';
+      if flagOverflows then
+         FlagError(6);
+      end; {if}
+   if isLongLong then begin
+      token.class := longlongConstant;
       Convertsll(token.qval, numString);
-      if isLongLong then begin
-         if unsigned then
-            token.qtype := uLongLongPtr
-         else
-            token.qtype := longLongPtr;
-         end {if}
-      else if isLong then begin
-         if unsigned then
-            token.ltype := uLongPtr
-         else
-            token.ltype := longPtr;
-         end {else if}
-      else begin
-         if unsigned then
-            token.itype := uIntPtr
-         else
-            token.itype := intPtr;
-         end; {else}
-      end {else if}
-   else begin                           {hex, octal, & binary}
-      token.qval.lo := 0;
-      token.qval.hi := 0;
-      if isHex then begin
-         i := 3;
-         if length(numString) < 3 then
-            FlagError(189);
-         while i <= length(numString) do begin
-            if token.qval.hi & $F0000000 <> 0 then begin
-               i := maxint;
-               if flagOverflows then
-                  FlagError(6);
-               end {if}
-            else begin
-               if numString[i] > '9' then
-                  val := (ord(numString[i])-7) & $000F
-               else
-                  val := ord(numString[i]) & $000F;
-               ShiftAndOrValue(4, val);
-               i := i+1;
-               end; {else}
-            end; {while}
-         end {if}
-      else if isBin then begin
-         i := 3;
-         if length(numString) < 3 then
-            FlagError(189);
-         while i <= length(numString) do begin
-            if token.qval.hi & $80000000 <> 0 then begin
-               i := maxint;
-               if flagOverflows then
-                  FlagError(6);
-               end {if}
-            else begin
-               if not (numString[i] in ['0','1']) then
-                  FlagError(121);
-               ShiftAndOrValue(1, ord(numString[i]) & $0001);
-               i := i+1;
-               end; {else}
-            end; {while}
-         end {if}
-      else begin
-         i := 2;
-         while i <= length(numString) do begin
-            if token.qval.hi & $E0000000 <> 0 then begin
-               i := maxint;
-               if flagOverflows then
-                  FlagError(6);
-               end {if}
-            else begin
-               if numString[i] in ['8','9'] then
-                  if not doingDigitSequence then
-                     FlagError(7);
-               ShiftAndOrValue(3, ord(numString[i]) & $0007);
-               i := i+1;
-               end; {else}
-            end; {while}
-         end; {else}
-      if token.qval.hi <> 0 then
-         isLongLong := true;
-      if not isLongLong then
-         if long(token.qval.lo).msw <> 0 then
-            isLong := true;
-      if isLongLong then begin
-         if unsigned or (token.qval.hi & $80000000 <> 0) then
-            token.qtype := uLongLongPtr
-         else
-            token.qtype := longLongPtr;
-         end {if}
-      else if isLong then begin
-         if unsigned or (token.qval.lo & $80000000 <> 0) then
-            token.ltype := uLongPtr
-         else
-            token.ltype := longPtr;
-         end {else if}
-      else begin
-         if unsigned or ((long(token.qval.lo).lsw & $8000) <> 0) then
-            token.itype := uIntPtr
-         else
-            token.itype := intPtr;
-         end; {else}
-      end; {else}
-   if isBitInt then
       if unsigned then
-         token.itype := GetBitIntType(true, BitWidth(token.qval))
+         token.kind := ulonglongConst
+      else begin
+         token.kind := longlongConst;
+         end; {else}
+      end {if}
+   else if isLong then begin
+      token.class := longConstant;
+      token.lval := Convertsl(numString);
+      if unsigned then
+         token.kind := ulongConst
       else
-         token.itype := GetBitIntType(false, BitWidth(token.qval) + 1);
-   case token.itype^.baseType of
-      cgWord: begin
-         token.class := intConstant;
-         token.kind := intconst;
-         end;
-      cgUWord: begin
-         token.class := intConstant;
-         token.kind := uintconst;
-         end;
-      cgLong: begin
-         token.class := longConstant;
-         token.kind := longconst;
-         end;
-      cgULong: begin
-         token.class := longConstant;
-         token.kind := ulongconst;
-         end;
-      cgQuad: begin
-         token.class := longlongConstant;
-         token.kind := longlongconst;
-         end;
-      cgUQuad: begin
-         token.class := longlongConstant;
-         token.kind := ulonglongconst;
-         end;
-      otherwise: begin
-         token.class := intConstant;
-         token.kind := intconst;
-         Error(57);
-         end;
-      end; {case}
+         token.kind := longConst;
+      end {if}
+   else begin
+      if unsigned then
+         token.kind := uintConst
+      else
+         token.kind := intConst;
+      token.class := intConstant;
+      token.lval := Convertsl(numString);
+      end; {else}
+   end {else if}
+else begin                            {hex, octal, & binary}
+   token.qval.lo := 0;
+   token.qval.hi := 0;
+   if isHex then begin
+      i := 3;
+      if length(numString) < 3 then
+         FlagError(189);
+      while i <= length(numString) do begin
+         if token.qval.hi & $F0000000 <> 0 then begin
+            i := maxint;
+            if flagOverflows then
+               FlagError(6);
+            end {if}
+         else begin
+            if numString[i] > '9' then
+               val := (ord(numString[i])-7) & $000F
+            else
+               val := ord(numString[i]) & $000F;
+            ShiftAndOrValue(4, val);
+            i := i+1;
+            end; {else}
+         end; {while}
+      end {if}
+   else if isBin then begin
+      i := 3;
+      if length(numString) < 3 then
+         FlagError(189);
+      while i <= length(numString) do begin
+         if token.qval.hi & $80000000 <> 0 then begin
+            i := maxint;
+            if flagOverflows then
+               FlagError(6);
+            end {if}
+         else begin
+            if not (numString[i] in ['0','1']) then
+               FlagError(121);
+            ShiftAndOrValue(1, ord(numString[i]) & $0001);
+            i := i+1;
+            end; {else}
+         end; {while}
+      end {if}
+   else begin
+      i := 2;
+      while i <= length(numString) do begin
+         if token.qval.hi & $E0000000 <> 0 then begin
+            i := maxint;
+            if flagOverflows then
+               FlagError(6);
+            end {if}
+         else begin
+            if numString[i] in ['8','9'] then
+               if not doingDigitSequence then
+                  FlagError(7);
+            ShiftAndOrValue(3, ord(numString[i]) & $0007);
+            i := i+1;
+            end; {else}
+         end; {while}
+      end; {else}
+   if token.qval.hi <> 0 then
+      isLongLong := true;
+   if not isLongLong then
+      if long(token.qval.lo).msw <> 0 then
+         isLong := true;
+   if isLongLong then begin
+      if unsigned or (token.qval.hi & $80000000 <> 0) then
+         token.kind := ulonglongConst
+      else
+         token.kind := longlongConst;
+      token.class := longlongConstant;
+      end {if}
+   else if isLong then begin
+      if unsigned or (token.qval.lo & $80000000 <> 0) then
+         token.kind := ulongConst
+      else
+         token.kind := longConst;
+      token.class := longConstant;
+      end {if}
+   else begin
+      if (long(token.qval.lo).lsw & $8000) <> 0 then
+         unsigned := true;
+      if unsigned then
+         token.kind := uintConst
+      else
+         token.kind := intConst;
+      token.class := intConstant;
+      end; {else}
    end; {else}
 if not atEnd then                       {make sure we read all characters}
    FlagError(189);
@@ -5038,8 +4417,7 @@ ucnString[0] := chr(i - 1);
 
 if (codePoint < 0) or (codePoint > maxUCSCodePoint)
    or ((codePoint >= $00D800) and (codePoint <= $00DFFF))
-   or ((codePoint < $A0) and not (ord(codePoint) in [$24,$40,$60])
-      and (cStd < c23) and strictMode)
+   or ((codePoint < $A0) and not (ord(codePoint) in [$24,$40,$60]))
    then begin
    Error(145);
    UniversalCharacterName := $0000C0;
@@ -5265,7 +4643,6 @@ allowSlashSlashComments := true;        {allow // comments (C99)}
 allowMixedDeclarations := true;         {allow mixed declarations & stmts (C99)}
 c99Scope := true;                       {follow C99 rules for block scopes}
 looseTypeChecks := true;                {loosen some standard type checks}
-strictC23Prototypes := false;           {loosen C23 prototype rules}
 extendedKeywords := true;               {allow extended ORCA/C keywords}
 extendedParameters := true;             {treat all floating params as extended}
 foundFunction := false;                 {no functions found so far}
@@ -5278,6 +4655,7 @@ new(macros);                            {no preprocessor macros so far}
 for i := 0 to hashSize do
    macros^[i] := nil;
 pathList := nil;			{no additional search paths}
+libPathList := nil;			{no additional library search paths}
 tokenList := nil;                       {nothing in putback buffer}
 saveNumber := false;                    {don't save numbers}
 expandMacros := true;                   {enable macro expansion}
@@ -5300,6 +4678,7 @@ doingStringOrCharacter := false;        {not doing a string}
 doingPPExpression := false;             {not doing a preprocessor expression}
 unix_1 := false;			{int is 16 bits}
 lintIsError := true;                    {lint messages are considered errors}
+numLintErrors := 0;
 fenvAccess := false;                    {not accessing fp environment}
 charStrPrefix := prefix_none;           {no char/str prefix seen}
 mergingStrings := false;                {not currently merging strings}
@@ -5307,7 +4686,6 @@ customDefaultName := nil;               {no custom default name}
 pragmaKeepFile := nil;                  {no #pragma keep file so far}
 doingFakeFile := false;                 {not doing a fake file}
 doingDigitSequence := false;            {not expecting a digit sequence}
-prohibitDefined := false;               {not prohibiting defined}
 preprocessing := false;                 {not preprocessing}
 cStd := c17;                            {default to C17}
 strictMode := false;                    {...with extensions}
@@ -5317,7 +4695,6 @@ strictMode := false;                    {...with extensions}
 lintErrors :=
    [51,104,105,110,124,125,128,129,130,147,151,152,153,154,155,170,185,186];
 
-comma := ',';                           {used for #embed}
 spaceStr := ' ';                        {strings used in stringization}
 quoteStr := '"';
                                         {set of classes for numeric constants}
@@ -5330,7 +4707,7 @@ mp^.parameters := -1;
 mp^.tokens := nil;
 mp^.readOnly := true;
 mp^.saved := true;
-mp^.algorithm := algLine;
+mp^.algorithm := 1;
 bp := pointer(ord4(macros) + hash(mp^.name));
 mp^.next := bp^;
 bp^ := mp;
@@ -5340,7 +4717,7 @@ mp^.parameters := -1;
 mp^.tokens := nil;
 mp^.readOnly := true;
 mp^.saved := true;
-mp^.algorithm := algFile;
+mp^.algorithm := 2;
 bp := pointer(ord4(macros) + hash(mp^.name));
 mp^.next := bp^;
 bp^ := mp;
@@ -5350,7 +4727,7 @@ mp^.parameters := -1;
 mp^.tokens := nil;
 mp^.readOnly := true;
 mp^.saved := true;
-mp^.algorithm := algDate;
+mp^.algorithm := 3;
 bp := pointer(ord4(macros) + hash(mp^.name));
 mp^.next := bp^;
 bp^ := mp;
@@ -5360,7 +4737,7 @@ mp^.parameters := -1;
 mp^.tokens := nil;
 mp^.readOnly := true;
 mp^.saved := true;
-mp^.algorithm := algTime;
+mp^.algorithm := 4;
 bp := pointer(ord4(macros) + hash(mp^.name));
 mp^.next := bp^;
 bp^ := mp;
@@ -5370,7 +4747,7 @@ mp^.parameters := -1;
 mp^.tokens := nil;
 mp^.readOnly := true;
 mp^.saved := true;
-mp^.algorithm := algOne;
+mp^.algorithm := 5;
 bp := pointer(ord4(macros) + hash(mp^.name));
 mp^.next := bp^;
 bp^ := mp;
@@ -5380,7 +4757,7 @@ mp^.parameters := -1;
 mp^.tokens := nil;
 mp^.readOnly := true;
 mp^.saved := true;
-mp^.algorithm := algOne;
+mp^.algorithm := 5;
 bp := pointer(ord4(macros) + hash(mp^.name));
 mp^.next := bp^;
 bp^ := mp;
@@ -5390,7 +4767,7 @@ mp^.parameters := -1;
 mp^.tokens := nil;
 mp^.readOnly := true;
 mp^.saved := true;
-mp^.algorithm := algVersion;
+mp^.algorithm := 6;
 bp := pointer(ord4(macros) + hash(mp^.name));
 mp^.next := bp^;
 bp^ := mp;
@@ -5400,7 +4777,7 @@ mp^.parameters := -1;
 mp^.tokens := nil;
 mp^.readOnly := true;
 mp^.saved := true;
-mp^.algorithm := algOne;
+mp^.algorithm := 5;
 bp := pointer(ord4(macros) + hash(mp^.name));
 mp^.next := bp^;
 bp^ := mp;
@@ -5410,7 +4787,7 @@ mp^.parameters := -1;
 mp^.tokens := nil;
 mp^.readOnly := true;
 mp^.saved := true;
-mp^.algorithm := algOne;
+mp^.algorithm := 5;
 bp := pointer(ord4(macros) + hash(mp^.name));
 mp^.next := bp^;
 bp^ := mp;
@@ -5420,7 +4797,7 @@ mp^.parameters := -1;
 mp^.tokens := nil;
 mp^.readOnly := true;
 mp^.saved := true;
-mp^.algorithm := algOne;
+mp^.algorithm := 5;
 bp := pointer(ord4(macros) + hash(mp^.name));
 mp^.next := bp^;
 bp^ := mp;
@@ -5430,7 +4807,7 @@ mp^.parameters := -1;
 mp^.tokens := nil;
 mp^.readOnly := true;
 mp^.saved := true;
-mp^.algorithm := algOne;
+mp^.algorithm := 5;
 bp := pointer(ord4(macros) + hash(mp^.name));
 mp^.next := bp^;
 bp^ := mp;
@@ -5440,7 +4817,7 @@ mp^.parameters := -1;
 mp^.tokens := nil;
 mp^.readOnly := true;
 mp^.saved := true;
-mp^.algorithm := algOne;
+mp^.algorithm := 5;
 bp := pointer(ord4(macros) + hash(mp^.name));
 mp^.next := bp^;
 bp^ := mp;
@@ -5450,7 +4827,7 @@ mp^.parameters := -1;
 mp^.tokens := nil;
 mp^.readOnly := true;
 mp^.saved := true;
-mp^.algorithm := algOne;
+mp^.algorithm := 5;
 bp := pointer(ord4(macros) + hash(mp^.name));
 mp^.next := bp^;
 bp^ := mp;
@@ -5460,7 +4837,7 @@ mp^.parameters := -1;
 mp^.tokens := nil;
 mp^.readOnly := true;
 mp^.saved := true;
-mp^.algorithm := algOne;
+mp^.algorithm := 5;
 bp := pointer(ord4(macros) + hash(mp^.name));
 mp^.next := bp^;
 bp^ := mp;
@@ -5470,7 +4847,7 @@ mp^.parameters := -1;
 mp^.tokens := nil;
 mp^.readOnly := true;
 mp^.saved := true;
-mp^.algorithm := algHosted;
+mp^.algorithm := 7;
 bp := pointer(ord4(macros) + hash(mp^.name));
 mp^.next := bp^;
 bp^ := mp;
@@ -5481,7 +4858,7 @@ mp^.isVarargs := true;
 mp^.tokens := nil;
 mp^.readOnly := true;
 mp^.saved := true;
-mp^.algorithm := algPragma;
+mp^.algorithm := 8;
 bp := pointer(ord4(macros) + hash(mp^.name));
 mp^.next := bp^;
 bp^ := mp;
@@ -5577,7 +4954,6 @@ repeat
             tPtr^.token.kind := intconst;
             tPtr^.token.numString := @oneStr;
             tPtr^.token.class := intConstant;
-            tPtr^.token.itype := intPtr;
             tPtr^.token.ival := 1;
             end; {else}
          end {if}
@@ -5587,6 +4963,16 @@ repeat
             GetString;
             LongToPString(workString, token.sval);
             AddPath(workString);
+            end {if}
+         else
+            FlagErrorAndSkip;
+         end {else if}
+      else if lch in ['l','L'] then begin
+         NextCh;                        {get the library pathname}
+         if lch = '"' then begin
+            GetString;
+            LongToPString(workString, token.sval);
+            AddLibPath(workString);
             end {if}
          else
             FlagErrorAndSkip;
@@ -5635,14 +5021,6 @@ repeat
             cStd := c17;
             strictMode := true;
             end {else if}
-         else if (stdName^ = 'c23compat') or (stdName^ = 'c24compat') then begin
-            cStd := c23;
-            strictMode := false;
-            end {else if}
-         else if (stdName^ = 'c23') or (stdName^ = 'c24') then begin
-            cStd := c23;
-            strictMode := true;
-            end {else if}
          else
             FlagErrorAndSkip;
          end {else if}
@@ -5666,7 +5044,7 @@ if cStd >= c95 then begin
    mp^.tokens := nil;
    mp^.readOnly := true;
    mp^.saved := true;
-   mp^.algorithm := algStdcVersion;
+   mp^.algorithm := 9;
    bp := pointer(ord4(macros) + hash(mp^.name));
    mp^.next := bp^;
    bp^ := mp;
@@ -5682,98 +5060,18 @@ if strictMode then begin
    looseTypeChecks := false;
    if cStd >= c99 then
       lint := lint | lintC99Syntax;
-   if cStd >= c23 then
-      strictC23Prototypes := true;
    new(mp);                             {add __KeepNamespacePure__ macro}
    mp^.name := @'__KeepNamespacePure__';
    mp^.parameters := -1;
    mp^.tokens := nil;
    mp^.readOnly := false;
    mp^.saved := true;
-   mp^.algorithm := algNone;
+   mp^.algorithm := 0;
    bp := pointer(ord4(macros) + hash(mp^.name));
    mp^.next := bp^;
    bp^ := mp;
    end; {if}
-if (cStd >= c23) or not strictMode then begin
-   new(mp);                             {__STDC_EMBED_NOT_FOUND__}
-   mp^.name := @'__STDC_EMBED_NOT_FOUND__';
-   mp^.parameters := -1;
-   mp^.tokens := nil;
-   mp^.readOnly := true;
-   mp^.saved := true;
-   mp^.algorithm := algZero;
-   bp := pointer(ord4(macros) + hash(mp^.name));
-   mp^.next := bp^;
-   bp^ := mp;
-   new(mp);                             {__STDC_EMBED_FOUND__}
-   mp^.name := @'__STDC_EMBED_FOUND__';
-   mp^.parameters := -1;
-   mp^.tokens := nil;
-   mp^.readOnly := true;
-   mp^.saved := true;
-   mp^.algorithm := algOne;
-   bp := pointer(ord4(macros) + hash(mp^.name));
-   mp^.next := bp^;
-   bp^ := mp;
-   new(mp);                             {__STDC_EMBED_EMPTY__}
-   mp^.name := @'__STDC_EMBED_EMPTY__';
-   mp^.parameters := -1;
-   mp^.tokens := nil;
-   mp^.readOnly := true;
-   mp^.saved := true;
-   mp^.algorithm := algTwo;
-   bp := pointer(ord4(macros) + hash(mp^.name));
-   mp^.next := bp^;
-   bp^ := mp;
-   new(mp);                             {__has_embed pseudo-macro}
-   mp^.name := @'__has_embed';
-   mp^.parameters := -1;
-   mp^.tokens := nil;
-   mp^.readOnly := true;
-   mp^.saved := true;
-   mp^.algorithm := algPseudoMacro;
-   bp := pointer(ord4(macros) + hash(mp^.name));
-   mp^.next := bp^;
-   bp^ := mp;
-   new(mp);                             {__has_include pseudo-macro}
-   mp^.name := @'__has_include';
-   mp^.parameters := -1;
-   mp^.tokens := nil;
-   mp^.readOnly := true;
-   mp^.saved := true;
-   mp^.algorithm := algPseudoMacro;
-   bp := pointer(ord4(macros) + hash(mp^.name));
-   mp^.next := bp^;
-   bp^ := mp;
-   new(mp);                             {__has_c_attribute pseudo-macro}
-   mp^.name := @'__has_c_attribute';
-   mp^.parameters := -1;
-   mp^.tokens := nil;
-   mp^.readOnly := true;
-   mp^.saved := true;
-   mp^.algorithm := algPseudoMacro;
-   bp := pointer(ord4(macros) + hash(mp^.name));
-   mp^.next := bp^;
-   bp^ := mp;
-   end;
-SetKeywordMask;
 end; {InitScanner}
-
-
-procedure SetKeywordMask;
-
-{ Set the mask defining which keywords to recognize based on    }
-{ current language mode.                                        }
-
-begin {SetKeywordMask}
-if cStd >= c23 then
-   keywordMask := c23keyword
-else
-   keywordMask := c17keyword;
-if extendedKeywords then
-   keywordMask := keywordMask | orcacKeyword;
-end; {SetKeywordMask}
 
 
 procedure CheckIdentifier;
@@ -5802,11 +5100,12 @@ if expandMacros then                    {handle macro expansions}
          end;
       end; {if}
                                         {see if it's a reserved word}
-if workString[1] in ['_','a'..'g','i','l','n','p','r'..'w'] then
+if workString[1] in ['_','a'..'g','i','l','p','r'..'w'] then
    for rword := wordHash[ord(workString[1])-ord('_')] to
       pred(wordHash[ord(succ(workString[1]))-ord('_')]) do
       if reservedWords[rword] = workString then
-         if (keywordCategories[rword] & keywordMask) <> 0 then begin
+         if extendedKeywords or not (rword in 
+         [asmsy,compsy,extendedsy,pascalsy,segmentsy]) then begin
             token.kind := rword;
             token.class := reservedWord;
             goto 1;
@@ -5849,7 +5148,7 @@ if cp = eofPtr then
    PeekCh := chr(0)
 else begin
    ch := chr(cp^);
-   if (ch = '?') and (cStd < c23) then  {handle trigraphs}
+   if ch = '?' then                     {handle trigraphs}
       if ord4(eofPtr)-ord4(cp) > 2 then
          if chr(ptr(ord4(cp)+1)^) = '?' then
             if chr(ptr(ord4(cp)+2)^) in
@@ -6081,12 +5380,8 @@ var
          cnt := cnt + 1;
       if charStrPrefix = prefix_none then
          result := (result << 8) | EscapeCh
-      else begin
+      else
          result := EscapeCh;
-         if (cStd >= c23) or (charStrPrefix = prefix_u8) then
-            if cnt > 1 then
-               Error(2);
-         end; {else}
       end; {while}
    doingStringOrCharacter := false;
    
@@ -6104,46 +5399,27 @@ var
       if allowLongIntChar and (cnt >= 3) then begin
          token.kind := longconst;
          token.class := longConstant;
-         token.ltype := longPtr;
          token.lval := result;
          end {if}
       else begin
          token.kind := intconst;
          token.class := intConstant;
-         token.itype := intPtr;
          token.ival := long(result).lsw;
          end; {else}
       end {if}
-   else if charStrPrefix = prefix_u8 then begin
-      token.kind := intconst;
-      token.class := intConstant;
-      token.itype := uCharPtr;
-      if octHexEscape then
-         token.ival := long(result).lsw
-      else begin
-         token.ival := long(result).lsw & $007f;
-         if (result & $ffffff80) <> 0 then
-            Error(195);
-         end; {else}
-      end {else if}
    else if charStrPrefix = prefix_u16 then begin
-      token.kind := uintconst;
+      token.kind := ushortconst;
       token.class := intConstant;
-      token.itype := uShortPtr;
       if octHexEscape then
          token.ival := long(result).lsw
       else begin
          UTF16Encode(result, utf16);
          token.ival := utf16.codeUnits[1];
-         if cStd >= c23 then
-            if utf16.length <> 1 then
-               Error(195);
          end; {else}
       end {else if}
    else if charStrPrefix = prefix_U32 then begin
       token.kind := ulongconst;
       token.class := longConstant;
-      token.ltype := uLongPtr;
       token.lval := result;
       end; {else if}
 
@@ -6305,11 +5581,7 @@ while charKinds[ord(ch)] in [illegal,ch_white,ch_eol,ch_pound] do begin
    if charKinds[ord(ch)] = ch_pound then begin
       if lastWasReturn or (token.kind = eolsy) then begin
          NextCh;                        {skip the '#' char}
-         PreProcess;                    {call the preprocessor}
-         if doingEmbed then begin
-            doingEmbed := false;
-            goto 2;
-            end; {if}
+         PreProcess                     {call the preprocessor}
          end {if}
       else
          goto 7;
@@ -6525,10 +5797,6 @@ case charKinds[ord(ch)] of
             token.kind := poundch;      {%: digraph}
             if lLastWasReturn then begin
                PreProcess;
-               if doingEmbed then begin
-                  doingEmbed := false;
-                  goto 2;
-                  end; {if}
                goto 5;
                end;
             end;
@@ -6589,10 +5857,6 @@ case charKinds[ord(ch)] of
          token.isDigraph := true;
          NextCh;
          end
-      else if (ch = ':') and ((cStd >= c23) or not strictMode) then begin
-         token.kind := coloncolonsy;
-         NextCh;
-         end         
       else
          token.kind := colonch;
       end;
@@ -6770,10 +6034,7 @@ case charKinds[ord(ch)] of
             end; {if}
          end {if}
       else if i = 2 then
-         if (charKinds[ord(ch)] = ch_string)
-            or ((charKinds[ord(ch)] = ch_char)
-               and (((cStd >= c23) or not strictMode)))
-            then
+         if charKinds[ord(ch)] = ch_string then
             if workString = 'u8' then begin
                charStrPrefix := prefix_u8;
                goto 6;
@@ -6858,7 +6119,6 @@ else if token.kind = ppNumber then
       Error(token.errCode);
       token.kind := intconst;
       token.class := intConstant;
-      token.itype := intPtr;
       token.ival := 0;
       token.numString := @'0';
       end; {if}

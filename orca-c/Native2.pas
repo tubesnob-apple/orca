@@ -1295,9 +1295,15 @@ procedure InitFile {keepName: gsosOutStringPtr; keepFlag: integer; partial: bool
    {normal program initialization}
    else if gnoStartup then begin
 
-      {GNO startup: toolboxes already running under the GNO kernel.
-       Skip ~_BWSTARTUP3 (ByteWorks tool startup) entirely.
-       Set data bank, then call ~C_STARTUP (GNO-aware), main, ~C_SHUTDOWN.}
+      {GNO startup: ~_BWSTARTUP3 must run first so that SystemUserID
+       saves the kernel-passed command line (X:Y) into ~CommandLine,
+       which ~C_STARTUP reads to build argc/argv.  The SANE/SysIO
+       init inside ~_BWSTARTUP3 is redundant under GNO but harmless.}
+      CnOut(m_jsl);
+      if rtl then
+         RefName(@'~_BWSTARTUP4', 0, 3, 0)
+      else
+         RefName(@'~_BWSTARTUP3', 0, 3, 0);
       SetDataBank;
       CnOut(m_jsl);
       if rtl then

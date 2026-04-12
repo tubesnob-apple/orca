@@ -842,7 +842,7 @@ resource rAlertString (base+3001) {
 
 resource rAlertString (base+3002) {
    "43/"
-   "Prizm 2.1.2\n"
+   "Prizm 2.3.0\n"
    "Copyright 1988, 1991, 1993, 1996\n"
    "Byte Works, Inc.  Updated 2024.\n"
    "\n"

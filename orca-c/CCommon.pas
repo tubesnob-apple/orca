@@ -112,7 +112,7 @@ const
    flag_t       = $00001000;            {treat all errors as terminal?}
    flag_w       = $00000200;            {wait when an error is found?}
 
-   versionStr = '2.2.7-20260409.190023';		{compiler version}
+   versionStr = '2.3.0-20260411.230355';		{compiler version}
 
 type
                                         {Misc.}

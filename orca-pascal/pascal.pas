@@ -45,7 +45,7 @@ stdnames;
 entstdnames;  
 EnterUndecl;  
 if progress or list then begin
-   writeln('ORCA/Pascal 2.2.7-20260409.190023'); 	{write banner}
+   writeln('ORCA/Pascal 2.3.0-20260411.230355'); 	{write banner}
    writeln('Copyright 1987,1988,1991,1993,1994,1996, Byte Works, Inc.');
    writeln;
    end; {if}

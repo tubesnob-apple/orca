@@ -1589,3 +1589,516 @@ index	ds	2	index into the hash table
 resolved ds	2	resolved mask for this pass
 requested ds	2	requested mask for this pass
 	end
+
+****************************************************************
+*
+*  SFCommon - private data for WriteSymbolFile
+*
+****************************************************************
+*
+SFCommon privdata
+sfRefnum ds	2	open file refnum
+sfFirst	ds	2	first-entry flag (0 = first)
+sfFlag	ds	2	scratch for symFlag
+
+crRec	dc	i'4'	OSCreate record
+crPath	ds	4
+	dc	i'$C3'	access
+	dc	i'$04'	fileType (TXT)
+	dc	i4'0'	auxType
+
+opRec	dc	i'2'	OSOpen record
+opRefnum ds	2
+opPath	ds	4
+
+wrRec	dc	i'4'	OSWrite record
+wrRefnum ds	2
+wrBuff	ds	4
+wrLength ds	4
+wrXfer	ds	4
+
+clRec	dc	i'1'	OSClose record
+clRefnum ds	2
+
+eofRec	dc	i'2'	OSSet_EOF record
+eofRefnum ds	2
+eofDisp	dc	i4'0'
+
+sfPath	ds	258	pathname buffer (2-byte len + 256)
+sfHexBuf ds	16	hex output buffer
+sfSuffix dc	c'.symbols'
+
+jsHdr1	dc	c'{"orca_symbols_version":"0x0001","target":"'
+jsHdr1L	equ	*-jsHdr1
+jsHdr2	dc	c'","linker":"ORCA/M Link Editor 2.3.0","segments":['
+jsHdr2L	equ	*-jsHdr2
+jsComma	dc	c','
+jsCommaL equ	*-jsComma
+jsSegA	dc	c'{"number":"'
+jsSegAL	equ	*-jsSegA
+jsSegB	dc	c'","name":"'
+jsSegBL	equ	*-jsSegB
+jsSegC	dc	c'","type":"'
+jsSegCL	equ	*-jsSegC
+jsSegD	dc	c'","org":"'
+jsSegDL	equ	*-jsSegD
+jsSegE	dc	c'","length":"'
+jsSegEL	equ	*-jsSegE
+jsSegF	dc	c'"}'
+jsSegFL	equ	*-jsSegF
+jsSyms	dc	c'],"symbols":['
+jsSymsL	equ	*-jsSyms
+jsSymA	dc	c'{"name":"'
+jsSymAL	equ	*-jsSymA
+jsSymB	dc	c'","segment":"'
+jsSymBL	equ	*-jsSymB
+jsSymC	dc	c'","offset":"'
+jsSymCL	equ	*-jsSymC
+jsSymD	dc	c'","global":'
+jsSymDL	equ	*-jsSymD
+jsEnd	dc	c']}'
+jsEndL	equ	*-jsEnd
+jsCode	dc	c'code'
+jsCodeL	equ	*-jsCode
+jsData	dc	c'data'
+jsDataL	equ	*-jsData
+jsJump	dc	c'jumptable'
+jsJumpL	equ	*-jsJump
+jsOther	dc	c'other'
+jsOtherL equ	*-jsOther
+jsTrue	dc	c'true'
+jsTrueL	equ	*-jsTrue
+jsFalse	dc	c'false'
+jsFalseL equ	*-jsFalse
+jsClose	dc	c'}'
+jsCloseL equ	*-jsClose
+	end
+
+****************************************************************
+*
+*  WriteSymbolFile - emit <target>.symbols JSON file
+*
+*  Inputs:
+*	kname - keep file name (GS/OS string: length word + chars)
+*	loadList - head of load segment list
+*	table - symbol hash table
+*
+****************************************************************
+*
+WriteSymbolFile start
+	using	Common
+	using	OutCommon
+	using	SymbolCommon
+	using	SFCommon
+;
+;  Return if no output file
+;
+	lda	kname
+	ora	kname+2
+	bne	wsf0
+	rts
+;
+;  Build sfPath = kname chars + ".symbols", update length word
+;
+wsf0	lda	[kname]	get original length
+	and	#$FFFF
+	sta	r4
+	add4	kname,#2,r0	r0 = ptr to chars
+	ldy	#0
+	short	M
+wsf1	cpy	r4
+	bge	wsf2
+	lda	[r0],Y
+	sta	sfPath+2,Y
+	iny
+	bra	wsf1
+wsf2	ldx	#0
+wsf3	cpx	#8
+	beq	wsf4
+	lda	sfSuffix,X
+	sta	sfPath+2,Y
+	iny
+	inx
+	bra	wsf3
+wsf4	long	M
+	sty	sfPath	new length word
+;
+;  Prepare the OSCreate/OSOpen records with the sfPath pointer
+;
+	lla	crPath,sfPath
+	lla	opPath,sfPath
+;
+;  Create the file (ignore "already exists" and similar errors)
+;
+	sfcreate crRec
+;
+;  Open the file
+;
+	sfopen opRec
+	jcs	wsfErr
+	lda	opRefnum
+	sta	sfRefnum
+;
+;  Truncate any existing contents
+;
+	sta	eofRefnum
+	stz	eofDisp
+	stz	eofDisp+2
+	sfseteof eofRec
+	jcs	wsfErr
+;
+;  Write header
+;
+	sfw	jsHdr1,jsHdr1L
+	jsr	SFWriteTarget
+	sfw	jsHdr2,jsHdr2L
+;
+;  Walk load segment list
+;
+	stz	sfFirst
+	move4	loadList,r4
+wsfs1	lda	r4
+	ora	r4+2
+	jeq	wsfs9
+	lda	sfFirst
+	beq	wsfs2
+	sfw	jsComma,jsCommaL
+wsfs2	lda	#1
+	sta	sfFirst
+	sfw	jsSegA,jsSegAL
+	ldy	#loadNumber-loadNext
+	lda	[r4],Y
+	jsr	SFHex16
+	sfw	jsSegB,jsSegBL
+	clc
+	lda	r4
+	adc	#loadName-loadNext
+	sta	r0
+	lda	r4+2
+	adc	#0
+	sta	r0+2
+	jsr	SFWriteSegName
+	sfw	jsSegC,jsSegCL
+	ldy	#loadType-loadNext
+	lda	[r4],Y
+	jsr	SFWriteSegType
+	sfw	jsSegD,jsSegDL
+	ldy	#loadORG-loadNext
+	lda	[r4],Y
+	sta	r0
+	iny
+	iny
+	lda	[r4],Y
+	sta	r0+2
+	jsr	SFHex32
+	sfw	jsSegE,jsSegEL
+	ldy	#loadPC-loadNext
+	lda	[r4],Y
+	sta	r0
+	iny
+	iny
+	lda	[r4],Y
+	sta	r0+2
+	jsr	SFHex32
+	sfw	jsSegF,jsSegFL
+	ldy	#2	advance to next segment
+	lda	[r4],Y
+	tax
+	lda	[r4]
+	sta	r4
+	stx	r4+2
+	brl	wsfs1
+wsfs9	sfw	jsSyms,jsSymsL
+;
+;  Walk symbol hash table
+;
+	stz	sfFirst
+	la	r12,hashSize*4-4
+wsft1	ldx	r12
+	lda	table,X
+	sta	r4
+	lda	table+2,X
+	sta	r4+2
+	ora	r4
+	jeq	wsft5
+wsft2	ldy	#symFlag
+	lda	[r4],Y
+	sta	sfFlag
+	and	#pass2Resolved
+	jeq	wsftN
+	lda	sfFlag
+	and	#isSegmentFlag
+	jne	wsftN
+;
+;  Emit this symbol
+;
+	lda	sfFirst
+	beq	wsft3
+	sfw	jsComma,jsCommaL
+wsft3	lda	#1
+	sta	sfFirst
+	sfw	jsSymA,jsSymAL
+	move4	r4,r0
+	jsr	SFWriteSymName
+	sfw	jsSymB,jsSymBL
+	ldy	#symSeg
+	lda	[r4],Y
+	jsr	SFHex16
+	sfw	jsSymC,jsSymCL
+	ldy	#symVal
+	lda	[r4],Y
+	sta	r0
+	iny
+	iny
+	lda	[r4],Y
+	sta	r0+2
+	jsr	SFHex32
+	sfw	jsSymD,jsSymDL
+	ldy	#symPriv
+	lda	[r4],Y
+	and	#$FFFF
+	bne	wsftG
+	sfw	jsTrue,jsTrueL
+	bra	wsftH
+wsftG	sfw	jsFalse,jsFalseL
+wsftH	sfw	jsClose,jsCloseL
+wsftN	ldy	#symNext+2
+	lda	[r4],Y
+	tax
+	lda	[r4]
+	sta	r4
+	stx	r4+2
+	ora	r4
+	beq	wsft5
+	brl	wsft2
+wsft5	sec
+	lda	r12
+	sbc	#4
+	sta	r12
+	bmi	wsft9
+	brl	wsft1
+wsft9	sfw	jsEnd,jsEndL
+;
+;  Close the file
+;
+	lda	sfRefnum
+	sta	clRefnum
+	jsl	$E100A8
+	dc	i2'$2014'
+	dc	i4'clRec'
+	rts
+
+wsfErr	lda	#12
+	jmp	TermError
+
+****************************************************************
+*  SFWriteRaw - write r2 bytes from [r0] to the symbol file
+****************************************************************
+SFWriteRaw anop
+	move4	r0,wrBuff
+	move4	r2,wrLength
+	lda	sfRefnum
+	sta	wrRefnum
+	sfwrt	wrRec
+	jcs	wsfErr
+	rts
+
+****************************************************************
+*  SFWriteBytes - write A bytes from [r0] to the symbol file
+****************************************************************
+SFWriteBytes anop
+	sta	wrLength
+	stz	wrLength+2
+	move4	r0,wrBuff
+	lda	sfRefnum
+	sta	wrRefnum
+	sfwrt	wrRec
+	jcs	wsfErr
+	rts
+
+****************************************************************
+*  SFWriteTarget - write basename of kname as JSON text
+****************************************************************
+SFWriteTarget anop
+	lda	[kname]	length
+	and	#$FFFF
+	sta	r6	r6 = length
+	add4	kname,#2,r0	r0 = chars ptr
+	lda	r6	Y = length (scan backward)
+	tay
+	short	M
+stg1	cpy	#0
+	beq	stg3
+	dey
+	lda	[r0],Y
+	cmp	#'/'
+	beq	stg2
+	cmp	#':'
+	bne	stg1
+stg2	iny	start index = sep+1
+stg3	long	M
+	sty	r8	r8 = start offset
+	clc		r0 = r0 + start
+	tya
+	adc	r0
+	sta	r0
+	lda	r0+2
+	adc	#0
+	sta	r0+2
+	sec		A = length - start
+	lda	r6
+	sbc	r8
+	beq	stg4
+	jsr	SFWriteBytes
+stg4	rts
+
+****************************************************************
+*  SFWriteSegName - write segment name (10 bytes, trim blanks)
+*  Input: r0 = ptr to loadName area
+****************************************************************
+SFWriteSegName anop
+	ldy	#nameSize
+	short	M
+wsn1	dey
+	bmi	wsn3
+	lda	[r0],Y
+	cmp	#0
+	beq	wsn1
+	cmp	#' '
+	beq	wsn1
+	iny		Y = count
+wsn3	long	M
+	tya
+	and	#$FFFF
+	beq	wsn4
+	jsr	SFWriteBytes
+wsn4	rts
+
+****************************************************************
+*  SFWriteSymName - write symbol name (p-string at r0+symName)
+*  Input: r0 = ptr to symbol record
+****************************************************************
+SFWriteSymName anop
+	ldy	#symName
+	short	M
+	lda	[r0],Y
+	long	M
+	and	#$FFFF
+	beq	wsy1
+	pha
+	add4	r0,#symName+1
+	pla
+	jsr	SFWriteBytes
+	sub4	r0,#symName+1	restore r0 to record base
+wsy1	rts
+
+****************************************************************
+*  SFWriteSegType - map loadType word (A) to type string
+****************************************************************
+SFWriteSegType anop
+	and	#$1F
+	cmp	#0
+	bne	wst1
+	sfw	jsCode,jsCodeL
+	rts
+wst1	cmp	#1
+	bne	wst2
+	sfw	jsData,jsDataL
+	rts
+wst2	cmp	#2
+	bne	wst3
+	sfw	jsJump,jsJumpL
+	rts
+wst3	sfw	jsOther,jsOtherL
+	rts
+
+****************************************************************
+*  SFHex16 - write word in A as "0xXXXX"
+****************************************************************
+SFHex16	anop
+	sta	r6
+	short	M
+	lda	#'0'
+	sta	sfHexBuf
+	lda	#'x'
+	sta	sfHexBuf+1
+	lda	r6+1
+	jsr	SFByte
+	sta	sfHexBuf+2
+	txa
+	sta	sfHexBuf+3
+	lda	r6
+	jsr	SFByte
+	sta	sfHexBuf+4
+	txa
+	sta	sfHexBuf+5
+	long	M
+	lla	r0,sfHexBuf
+	lda	#6
+	jsr	SFWriteBytes
+	rts
+
+****************************************************************
+*  SFHex32 - write long in r0 as "0xXXXXXXXX"
+****************************************************************
+SFHex32	anop
+	move4	r0,r6
+	short	M
+	lda	#'0'
+	sta	sfHexBuf
+	lda	#'x'
+	sta	sfHexBuf+1
+	lda	r6+3
+	jsr	SFByte
+	sta	sfHexBuf+2
+	txa
+	sta	sfHexBuf+3
+	lda	r6+2
+	jsr	SFByte
+	sta	sfHexBuf+4
+	txa
+	sta	sfHexBuf+5
+	lda	r6+1
+	jsr	SFByte
+	sta	sfHexBuf+6
+	txa
+	sta	sfHexBuf+7
+	lda	r6
+	jsr	SFByte
+	sta	sfHexBuf+8
+	txa
+	sta	sfHexBuf+9
+	long	M
+	lla	r0,sfHexBuf
+	lda	#10
+	jsr	SFWriteBytes
+	rts
+
+****************************************************************
+*  SFByte - byte in A -> high nibble hex in A, low nibble hex in X
+*  (caller must have short M active)
+****************************************************************
+SFByte	anop
+	pha
+	lsr	A
+	lsr	A
+	lsr	A
+	lsr	A
+	jsr	SFNib
+	tay
+	pla
+	and	#$0F
+	jsr	SFNib
+	tax
+	tya
+	rts
+
+SFNib	anop
+	cmp	#10
+	bcc	nib1
+	clc
+	adc	#'A'-'0'-10
+nib1	clc
+	adc	#'0'
+	rts
+	end

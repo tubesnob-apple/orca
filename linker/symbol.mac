@@ -334,6 +334,16 @@
  brl &bp
  mend
  macro
+&l jcs &bp
+&l bcc *+5
+ brl &bp
+ mend
+ macro
+&l jne &bp
+&l beq *+5
+ brl &bp
+ mend
+ macro
 &l la &ad1,&ad2
 &l anop
  lcla &lb
@@ -353,6 +363,39 @@
  sep #%00100000
  longa off
 .d
+ mend
+ macro
+&l lla &ad1,&ad2
+&l anop
+ lcla &lb
+ lclb &la
+ aif s:longa,.a
+ rep #%00100000
+ longa on
+&la setb 1
+.a
+ lda #&ad2
+&lb seta c:&ad1
+.b
+ sta &ad1(&lb)
+&lb seta &lb-1
+ aif &lb,^b
+ lda #^&ad2
+&lb seta c:&ad1
+.c
+ sta 2+&ad1(&lb)
+&lb seta &lb-1
+ aif &lb,^c
+ aif &la=0,.d
+ sep #%00100000
+ longa off
+.d
+ mend
+ macro
+&l sfw &n1,&n2
+&l lla r0,&n1
+ lda #&n2
+ jsr SFWriteBytes
  mend
  macro
 &l long &a,&b
@@ -742,4 +785,34 @@
  mexit
 .d
  sta 2+&op
+ mend
+ macro
+&l sfclos &p
+&l jsl $E100A8
+ dc i2'$2014'
+ dc i4'&p'
+ mend
+ macro
+&l sfcreate &p
+&l jsl $E100A8
+ dc i2'$2001'
+ dc i4'&p'
+ mend
+ macro
+&l sfopen &p
+&l jsl $E100A8
+ dc i2'$2010'
+ dc i4'&p'
+ mend
+ macro
+&l sfseteof &p
+&l jsl $E100A8
+ dc i2'$2018'
+ dc i4'&p'
+ mend
+ macro
+&l sfwrt &p
+&l jsl $E100A8
+ dc i2'$2013'
+ dc i4'&p'
  mend

@@ -685,6 +685,7 @@ Terminate private
 ;  Write the link statistics
 ;
 	jsr	PrintSymbols	print the symbol table
+	jsr	WriteSymbolFile	write the .symbols JSON file
 
 	lda	list	if list then
 	beq	sg1

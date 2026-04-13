@@ -816,3 +816,9 @@
  dc i2'$2013'
  dc i4'&p'
  mend
+ macro
+&l sfrdvar &p
+&l jsl $E100A8
+ dc i2'$014B'
+ dc i4'&p'
+ mend

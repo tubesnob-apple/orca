@@ -1628,6 +1628,17 @@ sfPath	ds	258	pathname buffer (2-byte len + 256)
 sfHexBuf ds	16	hex output buffer
 sfSuffix dc	c'.symbols'
 
+rvRec	dc	i'3'	Read_Variable DCB (GS): name, value, export
+rvNamePtr dc	a4'sfVarName'
+rvValuePtr dc	a4'sfVarBuf'
+rvExport ds	2
+
+sfVarName dc	i2'13'	gsosInString: length word + chars
+	dc	c'gsplusSymbols'
+sfVarBuf dc	i2'256'	gsosOutString: max length word
+sfVarLen ds	2	returned length word
+	ds	256	value data
+
 jsHdr1	dc	c'{"orca_symbols_version":"0x0001","target":"'
 jsHdr1L	equ	*-jsHdr1
 jsHdr2	dc	c'","linker":"ORCA/M Link Editor 2.3.0","segments":['
@@ -1695,8 +1706,21 @@ WriteSymbolFile start
 ;
 	lda	kname
 	ora	kname+2
-	bne	wsf0
+	bne	wsfV
 	rts
+;
+;  Gate on {gsplusSymbols} shell variable: skip unless set and non-empty
+;
+wsfV	lda	#256	reset the max-length word on every call
+	sta	sfVarBuf
+	jsl	$E100A8
+	dc	i2'$014B'
+	dc	i4'rvRec'
+	bcs	wsfSkip
+	lda	sfVarLen	if returned length is 0, skip
+	beq	wsfSkip
+	bra	wsf0
+wsfSkip	rts
 ;
 ;  Build sfPath = kname chars + ".symbols", update length word
 ;

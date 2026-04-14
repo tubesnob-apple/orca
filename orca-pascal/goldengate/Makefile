@@ -165,4 +165,5 @@ install: all
 clean:
 	rm -f $(OBJ_DIR)/*.a $(OBJ_DIR)/*.A $(OBJ_DIR)/*.B $(OBJ_DIR)/*.int $(OBJ_DIR)/*.root
 	rm -f $(BIN_OUT)
+	rm -f $(MAKEFILE_DIR)$(notdir $(BIN_OUT)) $(SRC_DIR)/$(notdir $(BIN_OUT))
 	@echo "Clean complete."

@@ -219,5 +219,6 @@ clean:
 	rm -f $(OBJ_DIR)/signal2.a $(OBJ_DIR)/signal2.root
 	rm -f $(OBJ_DIR)/version.asm
 	rm -f $(LIB_OUT)
+	rm -f $(BIN_DIR)/$(notdir $(LIB_OUT)) $(MAKEFILE_DIR)$(notdir $(LIB_OUT))
 	rm -f $(SRC_DIR)/*.A $(SRC_DIR)/*.ROOT
 	@echo "Clean complete (TARGET=$(TARGET))."

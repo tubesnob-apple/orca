@@ -75,5 +75,6 @@ install: all
 clean:
 	rm -f $(foreach m,$(ASM_MODULES),$(OBJ_DIR)/$(m).A $(OBJ_DIR)/$(m).ROOT)
 	rm -f $(LIB_OUT) $(BIN_OUT)
+	rm -f $(MAKEFILE_DIR)$(notdir $(BIN_OUT))
 	rm -f $(SRC_DIR)/*.A $(SRC_DIR)/*.ROOT
 	@echo "Clean complete."

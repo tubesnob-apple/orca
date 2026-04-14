@@ -85,3 +85,4 @@ setup-tests:
 clean:
 	$(GMAKE) -C .. -f GoldenGate.mk BIN_DIR=$(BIN_DIR) clean
 	rm -f $(CC_LOCAL)
+	rm -f $(abspath $(dir $(lastword $(MAKEFILE_LIST))))/cc $(abspath $(dir $(lastword $(MAKEFILE_LIST))))/../cc

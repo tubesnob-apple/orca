@@ -81,4 +81,5 @@ test:
 clean:
 	rm -rf $(OBJ_DIR)
 	rm -f $(BIN_OUT)
+	rm -f $(MAKEFILE_DIR)$(notdir $(BIN_OUT)) $(SRC_DIR)/$(notdir $(BIN_OUT))
 	@echo "Clean complete."

@@ -131,9 +131,35 @@ The `goldengate/tools/` directory contains Python utilities for working with ORC
 - **`#pragma lint -1`** in ORCA/C causes the compiler to omit the `~GLOBALS` segment from `.a` output when lint warnings are present, producing unlinkable objects. Workaround: use `#pragma lint 0`.
 - **`iix chtyp`** requires type names (`obj`, `exe`, `src`, `lib`), not hex codes.
 
+## Upstream Sources
+
+This monorepo is assembled from authoritative Byte Works, Inc. repositories
+published at [github.com/byteworksinc](https://github.com/byteworksinc). Each
+subdirectory is imported with its original git history preserved.
+
+| Subdirectory | Upstream repository |
+|--------------|---------------------|
+| `orcalib/` | [byteworksinc/ORCALib](https://github.com/byteworksinc/ORCALib) |
+| `paslib/` | [byteworksinc/PasLib](https://github.com/byteworksinc/PasLib) |
+| `syslib/` | [byteworksinc/SysLib](https://github.com/byteworksinc/SysLib) |
+| `sysfloat/` | [byteworksinc/SysFloat](https://github.com/byteworksinc/SysFloat) |
+| `sysfpefloat/` | [byteworksinc/SysFPEFloat](https://github.com/byteworksinc/SysFPEFloat) |
+| `linker/` | [byteworksinc/Linker](https://github.com/byteworksinc/Linker) |
+| `dumpobj/` | [byteworksinc/DumpObj](https://github.com/byteworksinc/DumpObj) |
+| `makelib/` | [byteworksinc/MakeLib](https://github.com/byteworksinc/MakeLib) |
+| `orca-c/` | [byteworksinc/ORCA-C](https://github.com/byteworksinc/ORCA-C) |
+| `orca-pascal/` | [byteworksinc/ORCA-Pascal](https://github.com/byteworksinc/ORCA-Pascal) |
+| `shell/` | [byteworksinc/Shell](https://github.com/byteworksinc/Shell) |
+| `prizm/` | [byteworksinc/Prizm](https://github.com/byteworksinc/Prizm) |
+
+Each upstream is also available as a mirror at
+[github.com/ksherlock](https://github.com/ksherlock) for several of these
+components (`DumpObj`, `Linker`, `MakeLib`, `ORCA-C`, `ORCA-Pascal`,
+`ORCALib`).
+
 ## Changes from Upstream
 
-This repository consolidates source from the following upstream repositories and adds a unified GoldenGate cross-build system:
+This repository consolidates source from the above repositories and adds a unified GoldenGate cross-build system:
 
 ### Source Consolidation
 - Combined 12 Byte Works repositories into a single monorepo with preserved git history

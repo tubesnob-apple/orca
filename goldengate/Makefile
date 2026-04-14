@@ -9,17 +9,9 @@
 #   make orcalib-install  — build + install orcalib only
 #   make orcalib-clean    — clean orcalib only
 #
-#   make orca-m           — build orca-m assembler only
-#   make orca-m-install   — build + install orca-m only
-#   make orca-m-clean     — clean orca-m only
-#
 #   make linker           — build linker only
 #   make linker-install   — build + install linker only
 #   make linker-clean     — clean linker only
-#
-#   make macgen            — build macgen only
-#   make macgen-install    — build + install macgen only
-#   make macgen-clean      — clean macgen only
 #
 #   make dumpobj           — build dumpobj only
 #   make dumpobj-install   — build + install dumpobj only
@@ -50,10 +42,9 @@
 #
 # Build order:
 #   1. orcalib  — runtime library (no dependencies)
-#   2. orca-m   — assembler (no dependencies on orcalib, but built second by convention)
-#   3. linker       — link editor (no dependencies)
-#   4. dumpobj      — OMF dump utility (no dependencies)
-#   5. makelib      — library archive tool (no dependencies)
+#   2. linker       — link editor (no dependencies)
+#   3. dumpobj      — OMF dump utility (no dependencies)
+#   4. makelib      — library archive tool (no dependencies)
 #   5. orca-pascal  — Pascal compiler (no dependencies on orcalib)
 #   6. orca-c       — C compiler (requires orcalib installed)
 #
@@ -93,14 +84,8 @@ SUBMAKE_ARGS := BIN_DIR=$(BIN_DIR) VERSION=$(VERSION) INSTALL_SH=$(INSTALL_SH) G
 
 .PHONY: all install clean
 .PHONY: orcalib orcalib-install orcalib-clean
-.PHONY: orca-m orca-m-install orca-m-clean
 .PHONY: linker linker-install linker-clean
-.PHONY: macgen macgen-install macgen-clean
 .PHONY: dumpobj dumpobj-install dumpobj-clean
-.PHONY: crunch crunch-install crunch-clean
-.PHONY: entab entab-install entab-clean
-.PHONY: makebin makebin-install makebin-clean
-.PHONY: debugger debugger-install debugger-clean
 .PHONY: makelib makelib-install makelib-clean
 .PHONY: paslib paslib-install paslib-clean
 .PHONY: syslib syslib-install syslib-clean
@@ -112,18 +97,18 @@ SUBMAKE_ARGS := BIN_DIR=$(BIN_DIR) VERSION=$(VERSION) INSTALL_SH=$(INSTALL_SH) G
 
 # ── Default: build everything ─────────────────────────────────────────────────
 
-all: orcalib paslib syslib sysfloat sysfpefloat orca-m linker macgen dumpobj crunch entab makebin debugger makelib orca-pascal orca-c
+all: orcalib paslib syslib sysfloat sysfpefloat linker dumpobj makelib orca-pascal orca-c
 	@echo "Build complete — version $(VERSION)"
 	@echo "Binaries staged in $(BIN_DIR)/"
 
 # ── Install everything ────────────────────────────────────────────────────────
 
-install: orcalib-install paslib-install syslib-install sysfloat-install sysfpefloat-install orca-m-install linker-install macgen-install dumpobj-install crunch-install entab-install makebin-install debugger-install makelib-install orca-pascal-install orca-c-install
+install: orcalib-install paslib-install syslib-install sysfloat-install sysfpefloat-install linker-install dumpobj-install makelib-install orca-pascal-install orca-c-install
 	@echo "Install complete — version $(VERSION)"
 
 # ── Clean everything ──────────────────────────────────────────────────────────
 
-clean: orcalib-clean paslib-clean syslib-clean sysfloat-clean sysfpefloat-clean orca-m-clean linker-clean macgen-clean dumpobj-clean crunch-clean entab-clean makebin-clean debugger-clean makelib-clean orca-pascal-clean orca-c-clean
+clean: orcalib-clean paslib-clean syslib-clean sysfloat-clean sysfpefloat-clean linker-clean dumpobj-clean makelib-clean orca-pascal-clean orca-c-clean
 	rm -rf $(BIN_DIR)
 
 # ── Version stamping ──────────────────────────────────────────────────────────
@@ -192,17 +177,6 @@ sysfpefloat-install:
 sysfpefloat-clean:
 	$(GMAKE) -C $(REPO_ROOT)/sysfpefloat/goldengate $(SUBMAKE_ARGS) clean
 
-# ── orca-m ────────────────────────────────────────────────────────────────────
-
-orca-m:
-	$(GMAKE) -C $(REPO_ROOT)/orca-m/goldengate $(SUBMAKE_ARGS)
-
-orca-m-install:
-	$(GMAKE) -C $(REPO_ROOT)/orca-m/goldengate $(SUBMAKE_ARGS) install
-
-orca-m-clean:
-	$(GMAKE) -C $(REPO_ROOT)/orca-m/goldengate $(SUBMAKE_ARGS) clean
-
 # ── linker ────────────────────────────────────────────────────────────────────
 
 linker:
@@ -214,17 +188,6 @@ linker-install:
 linker-clean:
 	$(GMAKE) -C $(REPO_ROOT)/linker/goldengate $(SUBMAKE_ARGS) clean
 
-# ── macgen ────────────────────────────────────────────────────────────────────
-
-macgen:
-	$(GMAKE) -C $(REPO_ROOT)/macgen/goldengate $(SUBMAKE_ARGS)
-
-macgen-install:
-	$(GMAKE) -C $(REPO_ROOT)/macgen/goldengate $(SUBMAKE_ARGS) install
-
-macgen-clean:
-	$(GMAKE) -C $(REPO_ROOT)/macgen/goldengate $(SUBMAKE_ARGS) clean
-
 # ── dumpobj ───────────────────────────────────────────────────────────────────
 
 dumpobj:
@@ -235,50 +198,6 @@ dumpobj-install:
 
 dumpobj-clean:
 	$(GMAKE) -C $(REPO_ROOT)/dumpobj/goldengate $(SUBMAKE_ARGS) clean
-
-# ── crunch ────────────────────────────────────────────────────────────────────
-
-crunch:
-	$(GMAKE) -C $(REPO_ROOT)/crunch/goldengate $(SUBMAKE_ARGS)
-
-crunch-install:
-	$(GMAKE) -C $(REPO_ROOT)/crunch/goldengate $(SUBMAKE_ARGS) install
-
-crunch-clean:
-	$(GMAKE) -C $(REPO_ROOT)/crunch/goldengate $(SUBMAKE_ARGS) clean
-
-# ── entab ─────────────────────────────────────────────────────────────────────
-
-entab:
-	$(GMAKE) -C $(REPO_ROOT)/entab/goldengate $(SUBMAKE_ARGS)
-
-entab-install:
-	$(GMAKE) -C $(REPO_ROOT)/entab/goldengate $(SUBMAKE_ARGS) install
-
-entab-clean:
-	$(GMAKE) -C $(REPO_ROOT)/entab/goldengate $(SUBMAKE_ARGS) clean
-
-# ── makebin ───────────────────────────────────────────────────────────────────
-
-makebin:
-	$(GMAKE) -C $(REPO_ROOT)/makebin/goldengate $(SUBMAKE_ARGS)
-
-makebin-install:
-	$(GMAKE) -C $(REPO_ROOT)/makebin/goldengate $(SUBMAKE_ARGS) install
-
-makebin-clean:
-	$(GMAKE) -C $(REPO_ROOT)/makebin/goldengate $(SUBMAKE_ARGS) clean
-
-# ── debugger ──────────────────────────────────────────────────────────────────
-
-debugger:
-	$(GMAKE) -C $(REPO_ROOT)/debugger/goldengate $(SUBMAKE_ARGS)
-
-debugger-install:
-	$(GMAKE) -C $(REPO_ROOT)/debugger/goldengate $(SUBMAKE_ARGS) install
-
-debugger-clean:
-	$(GMAKE) -C $(REPO_ROOT)/debugger/goldengate $(SUBMAKE_ARGS) clean
 
 # ── makelib ───────────────────────────────────────────────────────────────────
 

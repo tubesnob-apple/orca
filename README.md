@@ -21,10 +21,9 @@ The entire toolchain builds from source using the [GoldenGate](https://goldengat
 | `sysfloat/` | SysFloat 2.2.7 | ASM | SANE floating point library |
 | `sysfpefloat/` | SysFPEFloat 2.2.7 | ASM | FPE floating point library |
 
-### Assembler & Linker
+### Linker
 | Directory | Component | Language | Description |
 |-----------|-----------|----------|-------------|
-| `orca-m/` | Asm65816 2.1.0 | ASM (self-hosting) | ORCA/M macro assembler for 6502/65C02/65816 |
 | `linker/` | Linker 2.1.0 | ASM | ORCA link editor |
 
 ### Utilities
@@ -32,11 +31,6 @@ The entire toolchain builds from source using the [GoldenGate](https://goldengat
 |-----------|-----------|----------|-------------|
 | `makelib/` | MakeLib 2.2.7 | C | Library archive builder/manager |
 | `dumpobj/` | DumpOBJ 2.2.7 | C | OMF object file dumper |
-| `macgen/` | MacGen 2.0.3 | ASM | Macro definition pre-processor |
-| `crunch/` | Crunch 2.2.7 | C | OMF multi-segment object merger |
-| `entab/` | EnTab 2.0 | C | Tab/space converter |
-| `makebin/` | MakeBin 2.0 | ASM | Binary file creator |
-| `debugger/` | Debugger 1.1 | ASM | ORCA debugger + utilities (DebugBreak, DebugFast, DebugNoFast) |
 
 ### Deferred (source present, not wired into build)
 | Directory | Description |
@@ -72,12 +66,10 @@ The build system enforces dependency ordering:
 
 1. **orcalib** — C runtime library (no dependencies)
 2. **paslib, syslib, sysfloat, sysfpefloat** — additional libraries (no dependencies)
-3. **orca-m** — assembler (self-hosting)
-4. **linker** — link editor (self-hosting)
-5. **macgen, makebin, debugger** — ASM utilities (no library dependencies)
-6. **dumpobj, crunch, entab, makelib** — C utilities (require orcalib installed)
-7. **orca-pascal** — Pascal compiler (self-hosting)
-8. **orca-c** — C compiler (requires orcalib installed)
+3. **linker** — link editor (self-hosting)
+4. **dumpobj, makelib** — C utilities (require orcalib installed)
+5. **orca-pascal** — Pascal compiler (self-hosting)
+6. **orca-c** — C compiler (requires orcalib installed)
 
 ### Versioning
 
@@ -114,11 +106,6 @@ for f in Tests/Conformance/*.CC; do iix compile "$f" 2>&1 | grep -v "0 errors" &
 cd Tests/Spec.Conform && for f in *.CC; do iix compile "$f" 2>&1 | grep -v "0 errors" && echo "FAIL: $f"; done
 ```
 
-### ORCA/M Macro Tests
-```bash
-cd orca-m/tests && make
-```
-
 ### MakeLib Tests
 ```bash
 cd makelib && make -f goldengate/Makefile test
@@ -144,27 +131,20 @@ The `goldengate/tools/` directory contains Python utilities for working with ORC
 - **`#pragma lint -1`** in ORCA/C causes the compiler to omit the `~GLOBALS` segment from `.a` output when lint warnings are present, producing unlinkable objects. Workaround: use `#pragma lint 0`.
 - **`iix chtyp`** requires type names (`obj`, `exe`, `src`, `lib`), not hex codes.
 
-### ORCA/M EndProg
-
-The assembler (`orca-m/`) requires an `ENDPROG` label at the end of the linked program. The original build used `Z.EndP`, an opaque OMF library object. This repo replaces it with `EndProg.asm` — a 12-line source file that produces the same result.
-
 ## Changes from Upstream
 
 This repository consolidates source from the following upstream repositories and adds a unified GoldenGate cross-build system:
 
 ### Source Consolidation
 - Combined 12 Byte Works repositories into a single monorepo with preserved git history
-- Added ORCA/M assembler source (from Byte Works archives, not previously in a public repository)
-- Added MacGen, Crunch, EnTab, MakeBin, and Debugger source (from Byte Works archives)
 - Replaced MakeLib 2.0 with MakeLib 2.2.4 (includes bug fixes for Read4() sign-extension and multi-arg invocation)
 
 ### Build System (`goldengate/`)
-- Created unified top-level Makefile orchestrating all 16 components
+- Created unified top-level Makefile orchestrating all components
 - Consistent versioning across all binaries from `goldengate/VERSION`
 - Binary staging in `goldengate/bin_obj/` before installation
 - Automatic backup of existing GoldenGate binaries on install
 - Replaced platform-specific xattr commands with `iix chtyp`
-- Created `EndProg.asm` to replace the opaque `Z.EndP` library object
 
 ### ORCA/C (pre-release branch)
 - Based on the `v222-memory-fixes` branch with memory management and code generation fixes
@@ -176,12 +156,11 @@ This repository consolidates source from the following upstream repositories and
 - GoldenGate cross-build with `.B` → `.a` concatenation workaround
 
 ### Bug Reports
-- **ORCA/C `#pragma lint -1` bug**: When lint warnings are present, the compiler omits the `~GLOBALS` segment from `.a` output, causing "Unresolved reference" errors at link time. Affects DumpOBJ, Crunch, and any legacy source using `#pragma lint -1`.
+- **ORCA/C `#pragma lint -1` bug**: When lint warnings are present, the compiler omits the `~GLOBALS` segment from `.a` output, causing "Unresolved reference" errors at link time. Affects DumpOBJ and any legacy source using `#pragma lint -1`.
 
 ## Outstanding Issues
 
 - **Shell and PRIZM** source is present but not wired into the build system (not used by `iix`)
-- **MacGen** `directpage` include was recovered from Byte Works archives — verify completeness
 - **ORCA/Pascal** produces slightly different output when recompiled with itself (expected for self-hosting compilers)
 - **ORCA/C pre-release branch** is based on `v222-memory-fixes`, not `master` — some newer C23 features from master (nullptr, _BitInt, constexpr, etc.) are not included
 
@@ -189,7 +168,7 @@ This repository consolidates source from the following upstream repositories and
 
 This project would not be possible without the work of many people over several decades:
 
-- **Mike Westerfield** and **Byte Works, Inc.** — Original author of the entire ORCA toolchain (ORCA/C, ORCA/Pascal, ORCA/M, Linker, MakeLib, DumpOBJ, Crunch, EnTab, MakeBin, MacGen, Debugger, Shell, PRIZM, and all runtime libraries). The ORCA suite was a remarkable achievement in bringing professional development tools to the Apple IIGS platform.
+- **Mike Westerfield** and **Byte Works, Inc.** — Original author of the entire ORCA toolchain (ORCA/C, ORCA/Pascal, Linker, MakeLib, DumpOBJ, Shell, PRIZM, and all runtime libraries). The ORCA suite was a remarkable achievement in bringing professional development tools to the Apple IIGS platform.
 
 - **Kelvin Sherlock** — Creator of [GoldenGate](https://goldengate.byteworks.us/), the cross-compilation environment that makes it possible to build ORCA software on modern systems. GoldenGate's `iix` toolchain is the foundation that this entire build system rests on.
 

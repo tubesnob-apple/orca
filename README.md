@@ -1,8 +1,38 @@
 # ORCA Toolchain Monorepo
 
-A unified repository containing the complete source code for the **ORCA development toolchain** for the Apple IIGS (65816 processor), consolidated from the original Byte Works repositories and supplemented with additional source recovered from the Opus II distribution and other archives.
+A **one-stop shop** for the **ORCA development toolchain** for the Apple IIGS
+(65816 processor): all the compilers, libraries, linker, and utilities pulled
+together from their scattered upstream repositories into a single tree that
+builds and installs into [GoldenGate](https://goldengate.byteworks.us/) with a
+single command.
 
-The entire toolchain builds from source using the [GoldenGate](https://goldengate.byteworks.us/) `iix` cross-compilation environment on macOS, Linux, and Windows.
+## Goals
+
+The original Byte Works ORCA sources live in a dozen separate GitHub repos,
+each with its own build conventions, file-type metadata requirements, and
+install quirks. Getting a clean, working ORCA installation on a modern
+machine meant cloning each repo individually, figuring out its idiosyncratic
+build, manually copying binaries and libraries into the right GoldenGate
+subdirectories, and setting ProDOS file types by hand. This monorepo
+eliminates that:
+
+- **One checkout.** All ORCA toolchain source in one tree, with each
+  subdirectory's upstream git history preserved so blame and bisect still
+  work across the split.
+- **One build command.** `make -C goldengate install` compiles every
+  component with a consistent build system and places the output directly
+  into your `~/Library/GoldenGate/` installation (with automatic backups of
+  anything it overwrites).
+- **No manual file-type fiddling.** ProDOS file type metadata is set via
+  `iix chtyp` from within the Makefiles — no more hand-running `xattr` or
+  Python helpers after every build.
+- **Consistent versioning.** Every binary stamps itself with a shared
+  version string from `goldengate/VERSION` plus a build timestamp, so you
+  can always tell exactly which build is installed.
+- **Cross-platform.** The entire toolchain builds from source using the
+  [GoldenGate](https://goldengate.byteworks.us/) `iix` cross-compilation
+  environment on macOS, Linux, and Windows — no emulator or on-hardware
+  Apple IIGS build step required.
 
 ## Components
 

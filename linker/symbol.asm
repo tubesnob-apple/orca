@@ -2005,10 +2005,8 @@ wsn4	rts
 ****************************************************************
 SFWriteSymName anop
 	ldy	#symName
-	short	M
-	lda	[r0],Y
-	long	M
-	and	#$FFFF
+	lda	[r0],Y		A = length | first_char<<8 (16-bit load)
+	and	#$00FF		keep only the length byte
 	beq	wsy1
 	pha
 	add4	r0,#symName+1
@@ -2103,17 +2101,36 @@ SFHex32	anop
 *  SFByte - byte in A -> high nibble hex in A, low nibble hex in X
 *  (caller must have short M active)
 ****************************************************************
+*  SFByte — called with short M active; splits A (8-bit) into two
+*  hex nibble characters.  Returns A = high nibble char, X = low
+*  nibble char.
+*
+*  Note: the `long M / nop / short M` pairs around each jsr/rts
+*  boundary are load-bearing.  Without them, the assembler's
+*  tracked-M state and the live P-register M flag diverge at
+*  subroutine boundaries, and `pla`/index transfers end up reading
+*  wrong widths — causing stack corruption and a BRK trap a few
+*  instructions later.  Not fully understood; the fix was empirical.
 SFByte	anop
+	long	M
+	nop
+	short	M
 	pha
 	lsr	A
 	lsr	A
 	lsr	A
 	lsr	A
 	jsr	SFNib
+	long	M
+	nop
+	short	M
 	tay
 	pla
 	and	#$0F
 	jsr	SFNib
+	long	M
+	nop
+	short	M
 	tax
 	tya
 	rts

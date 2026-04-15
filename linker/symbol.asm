@@ -1778,7 +1778,14 @@ wsf4	long	M
 	jsr	SFWriteTarget
 	sfw	jsHdr2,jsHdr2L
 ;
-;  Walk load segment list
+;  Walk load segment list.  Note: loadList is often empty at the
+;  call site because the linker's segment list is populated/drained
+;  lazily during KeepFile processing — not as a side effect of pass1
+;  or pass2.  As a result the emitted segments[] array is often []
+;  even though the link produces segments.  Fixing this requires
+;  deeper linker internals work (likely: emit from SaveSegment's own
+;  list at the right moment, or use the alpha-sorted symbol list to
+;  reconstruct segments).
 ;
 	stz	sfFirst
 	move4	loadList,r4

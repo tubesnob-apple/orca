@@ -36,7 +36,7 @@ ifeq ($(GG_ROOT),)
 $(error GoldenGate root not found. Set $$GOLDEN_GATE or $$ORCA_ROOT.)
 endif
 
-UTILITIES_DIR := $(GG_ROOT)/Utilities
+LANGUAGES_DIR := $(GG_ROOT)/Languages
 
 BIN_OUT := $(BIN_DIR)/linker
 
@@ -77,9 +77,15 @@ $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
 
 # ── Install ───────────────────────────────────────────────────────────────────
+# The linker is always invoked as `iix link`, which loads it from the
+# hardcoded GS/OS path "16/linker" (prefix 16 = <GG_ROOT>/Languages). We
+# install it as Languages/Linker (uppercase matches the upstream Byte Works
+# naming convention; HFS+/APFS are case-insensitive so iix's lowercase
+# lookup still resolves). We deliberately do NOT install into Utilities/ —
+# `iix linker ...` is not supported; use `iix link` instead.
 install: all
-	@echo "--- install linker -> $(UTILITIES_DIR)/linker ---"
-	$(INSTALL_SH) $(BIN_OUT) $(UTILITIES_DIR)/linker $(GG_ROOT)
+	@echo "--- install Linker -> $(LANGUAGES_DIR)/Linker ---"
+	$(INSTALL_SH) $(BIN_OUT) $(LANGUAGES_DIR)/Linker $(GG_ROOT)
 
 # ── Clean ─────────────────────────────────────────────────────────────────────
 clean:

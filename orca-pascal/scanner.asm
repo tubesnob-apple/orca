@@ -1023,7 +1023,8 @@ if6	lda	lString+1,X	      TokenOut(ord(lString[i]));
 	bne	if6
 !			    end;
 if7	anop		  end;
-	ret	 	end; {insymbol}
+* end of insymbol
+	ret
 ;
 ;  LNextCh - call NextCh, then reset cPtr
 ;

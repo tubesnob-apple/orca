@@ -1627,6 +1627,7 @@ eofDisp	dc	i4'0'	displacement (longword)
 
 sfPath	ds	258	pathname buffer (2-byte len + 256)
 sfHexBuf ds	16	hex output buffer
+sfScratch ds	4	4-byte hex-conversion scratch (don't reuse r6 — overlaps r4+2)
 sfSuffix dc	c'.symbols'
 
 rvRec	dc	i'3'	Read_Variable DCB (GS): name, value, export
@@ -1778,16 +1779,49 @@ wsf4	long	M
 	jsr	SFWriteTarget
 	sfw	jsHdr2,jsHdr2L
 ;
-;  Walk load segment list.  Note: loadList is often empty at the
-;  call site because the linker's segment list is populated/drained
-;  lazily during KeepFile processing — not as a side effect of pass1
-;  or pass2.  As a result the emitted segments[] array is often []
-;  even though the link produces segments.  Fixing this requires
-;  deeper linker internals work (likely: emit from SaveSegment's own
-;  list at the right moment, or use the alpha-sorted symbol list to
-;  reconstruct segments).
+;  Walk load segment list.  At Terminate time the "current" segment
+;  is NOT in loadList: KeepFile's final GetSegment removed the last
+;  processed segment from the list, leaving it live in the current-
+;  segment globals (loadNumber, loadName, loadORG, loadPC, etc.).
+;  Emit that current segment first, then walk the rest from loadList.
 ;
 	stz	sfFirst
+;
+;  Emit the current segment from the loadNumber/loadName/... globals
+;  (only if a current segment exists — i.e., loadNumber != $FFFF).
+;
+	lda	loadNumber
+	cmp	#$FFFF
+	jeq	wsfs1
+	lda	#1
+	sta	sfFirst
+	sfw	jsSegA,jsSegAL
+	lda	loadNumber
+	jsr	SFHex16
+	sfw	jsSegB,jsSegBL
+	lla	r0,loadName
+	jsr	SFWriteSegName
+	sfw	jsSegC,jsSegCL
+	lda	loadType
+	jsr	SFWriteSegType
+	sfw	jsSegD,jsSegDL
+	lda	loadORG
+	sta	r0
+	lda	loadORG+2
+	sta	r0+2
+	jsr	SFHex32
+	sfw	jsSegE,jsSegEL
+	lda	loadPC
+	sta	r0
+	lda	loadPC+2
+	sta	r0+2
+	jsr	SFHex32
+	sfw	jsSegF,jsSegFL
+;
+;  Now walk anything else still in loadList (usually empty for
+;  single-segment links, but populated when multiple segments
+;  were processed).
+;
 	move4	loadList,r4
 wsfs1	lda	r4
 	ora	r4+2
@@ -1992,19 +2026,21 @@ SFWriteSegName anop
 	ldy	#nameSize
 	short	M
 wsn1	dey
-	bmi	wsn3
+	bmi	wsnEmpty	all spaces/nulls → write nothing
 	lda	[r0],Y
 	cmp	#0
 	beq	wsn1
 	cmp	#' '
 	beq	wsn1
-	iny		Y = count
+	iny			Y = count
 wsn3	long	M
 	tya
 	and	#$FFFF
 	beq	wsn4
 	jsr	SFWriteBytes
 wsn4	rts
+wsnEmpty long	M
+	rts
 
 ****************************************************************
 *  SFWriteSymName - write symbol name (p-string at r0+symName)
@@ -2046,18 +2082,18 @@ wst3	sfw	jsOther,jsOtherL
 *  SFHex16 - write word in A as "0xXXXX"
 ****************************************************************
 SFHex16	anop
-	sta	r6
+	sta	sfScratch		avoid r6 — r6 overlaps r4+2 in DP
 	short	M
 	lda	#'0'
 	sta	sfHexBuf
 	lda	#'x'
 	sta	sfHexBuf+1
-	lda	r6+1
+	lda	sfScratch+1
 	jsr	SFByte
 	sta	sfHexBuf+2
 	txa
 	sta	sfHexBuf+3
-	lda	r6
+	lda	sfScratch
 	jsr	SFByte
 	sta	sfHexBuf+4
 	txa
@@ -2072,28 +2108,28 @@ SFHex16	anop
 *  SFHex32 - write long in r0 as "0xXXXXXXXX"
 ****************************************************************
 SFHex32	anop
-	move4	r0,r6
+	move4	r0,sfScratch		avoid r6 — DP overlap with r4+2
 	short	M
 	lda	#'0'
 	sta	sfHexBuf
 	lda	#'x'
 	sta	sfHexBuf+1
-	lda	r6+3
+	lda	sfScratch+3
 	jsr	SFByte
 	sta	sfHexBuf+2
 	txa
 	sta	sfHexBuf+3
-	lda	r6+2
+	lda	sfScratch+2
 	jsr	SFByte
 	sta	sfHexBuf+4
 	txa
 	sta	sfHexBuf+5
-	lda	r6+1
+	lda	sfScratch+1
 	jsr	SFByte
 	sta	sfHexBuf+6
 	txa
 	sta	sfHexBuf+7
-	lda	r6
+	lda	sfScratch
 	jsr	SFByte
 	sta	sfHexBuf+8
 	txa
@@ -2112,12 +2148,15 @@ SFHex32	anop
 *  hex nibble characters.  Returns A = high nibble char, X = low
 *  nibble char.
 *
-*  Note: the `long M / nop / short M` pairs around each jsr/rts
-*  boundary are load-bearing.  Without them, the assembler's
-*  tracked-M state and the live P-register M flag diverge at
-*  subroutine boundaries, and `pla`/index transfers end up reading
-*  wrong widths — causing stack corruption and a BRK trap a few
-*  instructions later.  Not fully understood; the fix was empirical.
+*  The `long M / nop / short M` triples around each jsr/rts
+*  boundary are load-bearing: removing them reproducibly causes
+*  a BRK trap a few instructions into the return path.  The
+*  underlying cause is likely that the ORCA/M assembler's
+*  tracked-M state gets out of sync with the live P-register at
+*  subroutine boundaries under some condition, so `pla` pops the
+*  wrong width and the stack goes sideways.  The re-sync triples
+*  force the assembler and the CPU back into agreement at safe
+*  spots.
 SFByte	anop
 	long	M
 	nop

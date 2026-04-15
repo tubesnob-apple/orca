@@ -26,10 +26,10 @@
 GOLDENGATE      := $(or $(GOLDEN_GATE),/Library/GoldenGate)
 GG_ROOT         ?= $(GOLDENGATE)
 ORCACDEFS_SRC   := ../ORCACDefs
-ORCACDEFS_DST   := $(GOLDENGATE)/Libraries/ORCACDefs
+ORCACDEFS_DST   := $(GG_ROOT)/Libraries/ORCACDefs
 BIN_DIR         ?= $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 CC_LOCAL        := $(BIN_DIR)/cc
-CC_INSTALLED    := $(GOLDENGATE)/Languages/cc
+CC_INSTALLED    := $(GG_ROOT)/Languages/cc
 CC_BACKUP_DIR   := $(or $(TMPDIR),/tmp/)orca-c-cc-backup
 
 # Use Homebrew gmake if available, otherwise fall back to system make

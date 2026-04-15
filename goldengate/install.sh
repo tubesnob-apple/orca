@@ -43,6 +43,8 @@ if [ -f "$DEST" ]; then
     echo "  Backed up $DEST -> $BACKUP_FILE"
 fi
 
-# Install
+# Install (create destination directory if it doesn't exist — makes this
+# usable against a fresh staging tree as well as an existing GoldenGate root)
+mkdir -p "$DEST_DIR"
 cp "$SRC" "$DEST"
 echo "  Installed $SRC -> $DEST"

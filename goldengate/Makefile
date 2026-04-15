@@ -3,6 +3,9 @@
 # Targets:
 #   make                  — build all components (binaries staged in goldengate/bin_obj/)
 #   make install          — build + install everything into GoldenGate
+#   make package          — build + install into a staging dir + zip it up to
+#                           $TMPDIR/ORCA-GoldenGate-<version>-<timestamp>.zip
+#                           (does not touch the real GoldenGate install)
 #   make clean            — clean all components
 #
 #   make orcalib          — build orcalib only
@@ -236,3 +239,44 @@ orca-c-clean:
 .PHONY: setup
 setup:
 	$(GMAKE) -C $(REPO_ROOT)/orca-c/goldengate setup-tests
+
+# ── Package (zip a full install tree, without touching the real GG root) ─────
+#
+# `make package` builds everything, installs into a disposable staging
+# directory under $TMPDIR, and produces a zip at:
+#
+#     $TMPDIR/ORCA-GoldenGate-<base>-<timestamp>.zip
+#
+# e.g. /var/.../ORCA-GoldenGate-2.3.0-20260415.134102.zip
+#
+# The zip's top-level layout mirrors the GoldenGate installation
+# (Languages/, Libraries/, Utilities/, lib/, ...), so recipients can drop
+# its contents directly into their own GoldenGate root.
+#
+# The real /Library/GoldenGate is NOT touched by this target.
+.PHONY: package
+PACKAGE_TMP   := $(or $(TMPDIR),/tmp)
+PACKAGE_STAGE := $(PACKAGE_TMP)/ORCA-GoldenGate-stage-$(BUILD_TIMESTAMP)
+PACKAGE_ZIP   := $(PACKAGE_TMP)/ORCA-GoldenGate-$(VERSION).zip
+
+package:
+	@command -v zip >/dev/null 2>&1 || { echo "error: 'zip' command not found in PATH" >&2; exit 1; }
+	@rm -rf "$(PACKAGE_STAGE)" "$(PACKAGE_ZIP)"
+	@mkdir -p "$(PACKAGE_STAGE)"
+	@echo "Staging full install tree under $(PACKAGE_STAGE)"
+	@echo ""
+	$(GMAKE) -f $(firstword $(MAKEFILE_LIST)) install \
+	    GG_ROOT="$(PACKAGE_STAGE)" \
+	    BASE_VERSION="$(BASE_VERSION)" \
+	    BUILD_TIMESTAMP="$(BUILD_TIMESTAMP)"
+	@cp $(MAKEFILE_DIR)runmetoinstall.sh "$(PACKAGE_STAGE)/runmetoinstall.sh"
+	@chmod +x "$(PACKAGE_STAGE)/runmetoinstall.sh"
+	@echo ""
+	@echo "Creating zip: $(PACKAGE_ZIP)"
+	@cd "$(PACKAGE_STAGE)" && zip -rq "$(PACKAGE_ZIP)" .
+	@rm -rf "$(PACKAGE_STAGE)"
+	@echo ""
+	@echo "Package created:"
+	@ls -lh "$(PACKAGE_ZIP)"
+	@echo ""
+	@echo "To deploy: unzip this file into your GoldenGate root directory."

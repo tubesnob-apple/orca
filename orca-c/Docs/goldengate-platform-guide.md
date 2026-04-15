@@ -34,14 +34,13 @@ GoldenGate is supported on macOS, Linux, Windows (via MSYS2/Git Bash), and Solar
 | Priority | Location |
 |---|---|
 | 1 | `$GOLDEN_GATE` environment variable |
-| 2 | `$HOME/Library/GoldenGate` (macOS per-user default) |
-| 3 | `/Library/GoldenGate` (macOS system-wide) |
-| 4 | `/usr/local/share/GoldenGate` (Linux typical) |
-| 5 | `/usr/share/GoldenGate` (Linux system) |
+| 2 | `/Library/GoldenGate` (macOS system-wide, GoldenGate 2.1.0+ default) |
+| 3 | `/usr/local/share/GoldenGate` (Linux typical) |
+| 4 | `/usr/share/GoldenGate` (Linux system) |
 
 `$ORCA_ROOT` is also recognized as an alias for `$GOLDEN_GATE`.
 
-**macOS** users typically have GoldenGate at `~/Library/GoldenGate` (the installer default).
+**macOS** users (GoldenGate 2.1.0+) have GoldenGate at `/Library/GoldenGate` (the system-wide installer default). Older installations at `~/Library/GoldenGate` are no longer supported as a default — set `$GOLDEN_GATE` if you need a non-standard path.
 
 **Linux** users typically install to `/usr/local/share/GoldenGate` and must set
 `$GOLDEN_GATE` if using a non-standard path.
@@ -52,7 +51,7 @@ GoldenGate root directory.
 The `goldengate/Makefile` in this repo picks up `$GOLDEN_GATE` automatically:
 
 ```makefile
-GOLDENGATE := $(or $(GOLDEN_GATE),$(HOME)/Library/GoldenGate)
+GOLDENGATE := $(or $(GOLDEN_GATE),/Library/GoldenGate)
 ```
 
 ---
@@ -220,7 +219,7 @@ make clean           # Remove obj/ compiled objects and local cc binary
 
 ### `$GOLDEN_GATE` on Linux/Windows
 
-If GoldenGate is not at `~/Library/GoldenGate`, set the environment variable:
+If GoldenGate is not at `/Library/GoldenGate`, set the environment variable:
 
 ```bash
 export GOLDEN_GATE=/path/to/GoldenGate

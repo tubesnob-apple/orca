@@ -21,7 +21,7 @@ eliminates that:
   work across the split.
 - **One build command.** `make -C goldengate install` compiles every
   component with a consistent build system and places the output directly
-  into your `~/Library/GoldenGate/` installation (with automatic backups of
+  into your `/Library/GoldenGate/` installation (with automatic backups of
   anything it overwrites).
 - **No manual file-type fiddling.** ProDOS file type metadata is set via
   `iix chtyp` from within the Makefiles — no more hand-running `xattr` or

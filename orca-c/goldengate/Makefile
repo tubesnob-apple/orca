@@ -20,10 +20,10 @@
 #     Windows — filename:AFP_AfpInfo NTFS alternate data stream (60-byte AFP_Info)
 
 # GoldenGate root: honour $GOLDEN_GATE env var if set, else use the macOS
-# per-user default.  Linux/Windows users should set GOLDEN_GATE; iix itself
-# searches $GOLDEN_GATE, $HOME/Library/GoldenGate, /usr/local/share/GoldenGate,
-# and /usr/share/GoldenGate in that order.
-GOLDENGATE      := $(or $(GOLDEN_GATE),$(HOME)/Library/GoldenGate)
+# system default /Library/GoldenGate (GoldenGate 2.1.0+).  Linux/Windows users
+# should set GOLDEN_GATE; iix itself searches $GOLDEN_GATE, /Library/GoldenGate,
+# /usr/local/share/GoldenGate, and /usr/share/GoldenGate in that order.
+GOLDENGATE      := $(or $(GOLDEN_GATE),/Library/GoldenGate)
 GG_ROOT         ?= $(GOLDENGATE)
 ORCACDEFS_SRC   := ../ORCACDefs
 ORCACDEFS_DST   := $(GOLDENGATE)/Libraries/ORCACDefs

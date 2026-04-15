@@ -48,12 +48,12 @@ BIN_DIR      ?= $(MAKEFILE_DIR)
 
 # ── GoldenGate root — platform-aware ──────────────────────────────────────────
 # Respects $GOLDEN_GATE / $ORCA_ROOT first, then falls back to platform default.
-#   macOS:   ~/Library/GoldenGate  (installer default)
+#   macOS:   /Library/GoldenGate   (GoldenGate 2.1.0+ installer default)
 #   Linux:   /usr/local/share/GoldenGate  (typical system install)
 #   Windows: no default — $GOLDEN_GATE must be set
 OS := $(shell uname -s 2>/dev/null || echo Windows)
 ifeq ($(OS),Darwin)
-_GG_DEFAULT := $(HOME)/Library/GoldenGate
+_GG_DEFAULT := /Library/GoldenGate
 else ifeq ($(OS),Linux)
 _GG_DEFAULT := /usr/local/share/GoldenGate
 else

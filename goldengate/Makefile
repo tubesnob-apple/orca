@@ -60,7 +60,7 @@ INSTALL_SH   := $(abspath $(MAKEFILE_DIR)/install.sh)
 # ── GoldenGate root (needed for install backups) ─────────────────────────────
 OS := $(shell uname -s 2>/dev/null || echo Windows)
 ifeq ($(OS),Darwin)
-_GG_DEFAULT := $(HOME)/Library/GoldenGate
+_GG_DEFAULT := /Library/GoldenGate
 else ifeq ($(OS),Linux)
 _GG_DEFAULT := /usr/local/share/GoldenGate
 else

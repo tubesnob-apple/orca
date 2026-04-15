@@ -9,9 +9,9 @@
 # where <relative_path> is the path from <gg_root> to the destination directory.
 #
 # Example:
-#   install.sh bin_obj/cc ~/Library/GoldenGate/Languages/cc ~/Library/GoldenGate
+#   install.sh bin_obj/cc /Library/GoldenGate/Languages/cc /Library/GoldenGate
 #   → backs up to $TMPDIR/goldenGate/Languages/cc_20260409170300
-#   → then copies bin_obj/cc to ~/Library/GoldenGate/Languages/cc
+#   → then copies bin_obj/cc to /Library/GoldenGate/Languages/cc
 
 set -e
 

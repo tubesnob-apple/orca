@@ -31,7 +31,7 @@
 CC          := iix compile
 LINK        := iix link
 OBJ_DIR     := obj
-INSTALL_DIR := $(HOME)/Library/GoldenGate/Utilities
+INSTALL_DIR := $(or $(GOLDEN_GATE),/Library/GoldenGate)/Utilities
 
 .PHONY: all clean install test
 

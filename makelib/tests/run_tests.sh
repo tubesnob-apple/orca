@@ -15,7 +15,7 @@
 #   make install && make test
 #
 # IMPORTANT: 'iix makelib' always runs the binary installed in
-# ~/Library/GoldenGate/Utilities/MakeLib, never ./MakeLib directly.
+# /Library/GoldenGate/Utilities/MakeLib, never ./MakeLib directly.
 # You MUST run 'make install' before 'make test' when validating a new build.
 #
 # Exit code: 0 if all tests pass, 1 if any fail.

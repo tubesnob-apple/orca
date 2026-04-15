@@ -1620,9 +1620,10 @@ wrXfer	ds	4
 clRec	dc	i'1'	OSClose record
 clRefnum ds	2
 
-eofRec	dc	i'2'	OSSet_EOF record
+eofRec	dc	i'3'	OSSet_EOF record
 eofRefnum ds	2
-eofDisp	dc	i4'0'
+	dc	i'0'	base (word): 0 = start-relative
+eofDisp	dc	i4'0'	displacement (longword)
 
 sfPath	ds	258	pathname buffer (2-byte len + 256)
 sfHexBuf ds	16	hex output buffer

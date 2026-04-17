@@ -195,7 +195,15 @@ hi = lf->numSyms - 1;
 while (lo <= hi) {
     mid = (lo + hi) >> 1;
     cmp = strcmp(lf->syms[mid].name, name);
-    if (cmp == 0) return lf->syms[mid].segOffset;
+    if (cmp == 0) {
+        /* Per Appendix F: a private_flag=1 entry's symbol "is valid
+         * only in the object file in which it occurred" — i.e. it
+         * can satisfy references from segments MakeLib pulled from
+         * the same original object, but not an arbitrary external
+         * reference.  Treat those as no-match for external lookups. */
+        if (lf->syms[mid].isPrivate) return -1;
+        return lf->syms[mid].segOffset;
+        }
     if (cmp < 0)  lo = mid + 1;
     else          hi = mid - 1;
     }

@@ -356,13 +356,16 @@ for (;;) {
         if (op != OP_DS) fseek(fp, (long)len, SEEK_CUR);
         }
     else if (op == OP_GLOBAL || op == OP_LOCAL) {
+        /* Both flavours can satisfy requests in practice — ORCA/C
+         * tends to emit routine entry points as LOCAL and still
+         * expects cross-file resolution.  We match symbols solely
+         * on the REQUESTED-but-not-RESOLVED bit regardless of which
+         * record type defined them. */
         char name[NAME_MAX];
         Symbol *sym;
-        OmfReadPString(fp, name, NAME_MAX);
-        {
         char *p;
+        OmfReadPString(fp, name, NAME_MAX);
         for (p = name; *p; p++) *p = (char)toupper(*p);
-        }
         fseek(fp, 4, SEEK_CUR);  /* skip 4 bytes of attrs */
         sym = SymFind(name);
         if (sym && (sym->flags & SYM_PASS1_REQUESTED) &&
@@ -372,11 +375,9 @@ for (;;) {
     else if (op == OP_GEQU || op == OP_EQU) {
         char name[NAME_MAX];
         Symbol *sym;
-        OmfReadPString(fp, name, NAME_MAX);
-        {
         char *p;
+        OmfReadPString(fp, name, NAME_MAX);
         for (p = name; *p; p++) *p = (char)toupper(*p);
-        }
         fseek(fp, 4, SEEK_CUR);  /* skip attrs */
         SkipExpr(fp, EXPR_PHASE_COLLECT);
         sym = SymFind(name);

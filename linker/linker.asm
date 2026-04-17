@@ -306,6 +306,10 @@ sf8	anop
 	putcr
 wh1	anop
 ;
+;  Compute gsplusSymbols gate and link signature (uses kname set above)
+;
+	jsr	InitGsplusSymbols
+;
 ;  Return to main
 ;
 	clc

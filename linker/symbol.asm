@@ -1592,6 +1592,17 @@ requested ds	2	requested mask for this pass
 
 ****************************************************************
 *
+*  GsplusCommon - public data shared between symbol.asm and out.asm
+*
+****************************************************************
+*
+GsplusCommon data
+sfSig	ds	4	32-bit link signature (name hash XOR tick nonce)
+sfGsplusEnabled ds 2	1 = gsplusSymbols active, 0 = disabled
+	end
+
+****************************************************************
+*
 *  SFCommon - private data for WriteSymbolFile
 *
 ****************************************************************
@@ -1641,10 +1652,12 @@ sfVarBuf dc	i2'256'	gsosOutString: max length word
 sfVarLen ds	2	returned length word
 	ds	256	value data
 
-jsHdr1	dc	c'{"orca_symbols_version":"0x0001","target":"'
+jsHdr1	dc	c'{"orca_symbols_version":"0x0001","symsig":"'
 jsHdr1L	equ	*-jsHdr1
-jsHdr2	dc	c'","linker":"ORCA/M Link Editor 2.3.0","segments":['
+jsHdr2	dc	c'","target":"'
 jsHdr2L	equ	*-jsHdr2
+jsHdr3	dc	c'","linker":"ORCA/M Link Editor 2.3.0","segments":['
+jsHdr3L	equ	*-jsHdr3
 jsComma	dc	c','
 jsCommaL equ	*-jsComma
 jsSegA	dc	c'{"number":"'
@@ -1689,6 +1702,112 @@ jsCloseL equ	*-jsClose
 
 ****************************************************************
 *
+*  InitGsplusSymbols - check gsplusSymbols shell variable and
+*    compute the 32-bit link signature.  Call at end of
+*    Initialize, after kname is set.
+*
+*  Outputs:
+*	sfGsplusEnabled - 1 if symbol file active, else 0
+*	sfSig - 32-bit signature (valid when sfGsplusEnabled = 1)
+*
+****************************************************************
+*
+InitGsplusSymbols start
+	using	Common
+	using	GsplusCommon
+	using	SFCommon
+;
+;  Skip if no output file
+;
+	lda	kname
+	ora	kname+2
+	bne	igs1
+	stz	sfGsplusEnabled
+	rts
+;
+;  Check gsplusSymbols shell variable
+;
+igs1	lda	#256		reset the max-length word
+	sta	sfVarBuf
+	jsl	$E100A8
+	dc	i2'$014B'	Read_Variable
+	dc	i4'rvRec'
+	bcs	igsSkip		error: variable not set
+	lda	sfVarLen
+	beq	igsSkip		empty: variable not set
+;
+;  Variable is set — mark enabled and compute signature
+;
+	lda	#1
+	sta	sfGsplusEnabled
+;
+;  Seed sfSig with GetTick (Misc Tools $03, function $25)
+;  Returns 32-bit tick count; low word in A after pla, high in X
+;
+	pha			space for high word of tick
+	pha			space for low word of tick
+	ldx	#$2503		GetTick
+	jsl	$E10000
+	pla			A = tick low word
+	sta	sfSig
+	plx			X = tick high word
+	stx	sfSig+2
+;
+;  Hash the basename of kname into sfSig:
+;    for each char: rotate sfSig left 7 bits, XOR with char
+;
+	lda	[kname]		r4 = kname length
+	and	#$FFFF
+	sta	r4
+	add4	kname,#2,r0	r0 = ptr to kname chars
+	tay			Y = length
+	short	M
+;
+;  Scan backward to find last path separator
+;
+igs2	cpy	#0
+	beq	igs3
+	dey
+	lda	[r0],Y
+	cmp	#'/'
+	beq	igs4
+	cmp	#':'
+	bne	igs2
+igs4	iny			basename starts after separator
+igs3	long	M
+	sty	r6		r6 = basename start index
+;
+;  Hash each basename char
+;
+igs5	lda	r6		done when index reaches total length
+	cmp	r4
+	bge	igsDone
+	ldx	#7		rotate sfSig left 7 bits
+igs6	asl	sfSig		shift low word; old bit 15 → carry
+	rol	sfSig+2		shift high word; carry→bit0; old bit 31→carry
+	bcc	igs7
+	lda	sfSig		old bit 31 wraps to bit 0
+	ora	#1
+	sta	sfSig
+igs7	dex
+	bne	igs6
+	ldy	r6		XOR current char into low byte of sfSig
+	short	M
+	lda	[r0],Y
+	long	M
+	and	#$00FF
+	eor	sfSig
+	sta	sfSig
+	inc	r6
+	bra	igs5
+igsDone	rts
+
+igsSkip	stz	sfGsplusEnabled
+	rts
+	end
+
+****************************************************************
+*
 *  WriteSymbolFile - emit <target>.symbols JSON file
 *
 *  Inputs:
@@ -1703,25 +1822,15 @@ WriteSymbolFile start
 	using	OutCommon
 	using	SymbolCommon
 	using	SFCommon
+	using	GsplusCommon
 ;
-;  Return if no output file
+;  Return if no output file or gsplusSymbols not set
 ;
 	lda	kname
 	ora	kname+2
-	bne	wsfV
-	rts
-;
-;  Gate on {gsplusSymbols} shell variable: skip unless set and non-empty
-;
-wsfV	lda	#256	reset the max-length word on every call
-	sta	sfVarBuf
-	jsl	$E100A8
-	dc	i2'$014B'
-	dc	i4'rvRec'
-	bcs	wsfSkip
-	lda	sfVarLen	if returned length is 0, skip
 	beq	wsfSkip
-	bra	wsf0
+	lda	sfGsplusEnabled
+	bne	wsf0
 wsfSkip	rts
 ;
 ;  Build sfPath = kname chars + ".symbols", update length word
@@ -1773,11 +1882,17 @@ wsf4	long	M
 	sfseteof eofRec
 	jcs	wsfErr
 ;
-;  Write header
+;  Write header: version, symsig, target, linker, segments prefix
 ;
 	sfw	jsHdr1,jsHdr1L
-	jsr	SFWriteTarget
+	lda	sfSig		write 32-bit signature as "0xXXXXXXXX"
+	sta	r0
+	lda	sfSig+2
+	sta	r0+2
+	jsr	SFHex32
 	sfw	jsHdr2,jsHdr2L
+	jsr	SFWriteTarget
+	sfw	jsHdr3,jsHdr3L
 ;
 ;  Walk load segment list.  At Terminate time the "current" segment
 ;  is NOT in loadList: KeepFile's final GetSegment removed the last

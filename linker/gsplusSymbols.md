@@ -34,9 +34,9 @@ iix link -DgsplusSymbols=1 ...      # WRONG — linker does not understand -D
 The variable name `gsplusSymbols` is **case-sensitive** — it must match
 exactly.
 
-When the variable is unset or empty, WriteSymbolFile returns immediately
-without creating the file. The linked binary is byte-identical whether
-the gate is open or closed.
+When the variable is unset or empty, no symbol file is written and no
+WDM prologue is injected into the binary. When the variable is set, both
+outputs are produced together.
 
 ## Output file
 
@@ -51,6 +51,45 @@ iix -DgsplusSymbols=1 link foo.a keep=MyProg
 
 If no `keep=` is specified (no output file), no symbol file is created.
 
+## WDM prologue injected into the binary
+
+When `gsplusSymbols` is set, the linker injects an 8-byte prologue at the
+very start of the first OMF code segment (segment 1). This prologue fires
+the WDM trap when the binary begins executing, signalling the emulator to
+bind the symbol table to the loaded binary.
+
+```
+Offset 0–1:  $42 $0F   WDM $0F  — traps to the emulator
+Offset 2–3:  $80 $04   BRA +4   — CPU skips the 4-byte signature on resume
+Offset 4–7:  <sig>     32-bit link signature (little-endian)
+Offset 8+:              actual user code
+```
+
+All pass-1 symbol offsets in segment 1 are automatically shifted by 8 to
+account for the prologue, so no relocation entries are disturbed.
+
+### Signature generation
+
+The 32-bit signature (`symsig`) is computed at link time:
+
+1. The tick counter (`GetTick`, Misc Tools) seeds a 32-bit value.
+2. Each character of the output basename is mixed in: rotate the value
+   left 7 bits, then XOR with the character byte.
+
+The result changes on every link run of the same file (different ticks)
+and differs across files with different names (different hash). It is
+stored little-endian in the binary at offsets 4–7 of the prologue.
+
+### How GSplus binds symbols
+
+1. **At reset/restart:** GSplus walks the file root, opens every file
+   whose name ends in `.symbols`, reads the `symsig` field, and builds
+   an in-memory index keyed by signature value.
+2. **At WDM $0F trap:** the emulator reads the 4 bytes at `[PC+4]`
+   (immediately after the BRA instruction) as a little-endian 32-bit
+   integer, looks it up in the signature index, and binds that symbol
+   table to the segment currently loading.
+
 ## JSON format
 
 The file contains a single line of JSON (no pretty-printing, no trailing
@@ -59,6 +98,7 @@ newline). The top-level object has these fields:
 ```json
 {
   "orca_symbols_version": "0x0001",
+  "symsig": "0xXXXXXXXX",
   "target": "MyProg",
   "linker": "ORCA/M Link Editor 2.3.0",
   "segments": [ ... ],
@@ -71,6 +111,7 @@ newline). The top-level object has these fields:
 | Field | Type | Description |
 |-------|------|-------------|
 | `orca_symbols_version` | string | Format version. Currently `"0x0001"`. |
+| `symsig` | string | 32-bit link signature as an 8-digit hex string (e.g. `"0x1A2B3C4D"`). Matches the value embedded in the binary prologue at offsets 4–7 (little-endian). |
 | `target` | string | Base name of the linked binary (from the `keep=` argument). |
 | `linker` | string | Linker identification string including version. |
 | `segments` | array | Array of segment objects (see below). |
@@ -143,7 +184,7 @@ iix -DgsplusSymbols=1 link obj/hello keep=Hello
 Produces `Hello.symbols`:
 
 ```json
-{"orca_symbols_version":"0x0001","target":"Hello","linker":"ORCA/M Link Editor 2.3.0","segments":[{"number":"0x0002","name":"Hello","type":"code","org":"0x00000000","length":"0x00000100"}],"symbols":[{"name":"MAIN","segment":"0x0001","offset":"0x00000000","global":true},{"name":"_HELPER","segment":"0x0001","offset":"0x00000080","global":false}]}
+{"orca_symbols_version":"0x0001","symsig":"0xDEADBEEF","target":"Hello","linker":"ORCA/M Link Editor 2.3.0","segments":[{"number":"0x0002","name":"Hello","type":"code","org":"0x00000000","length":"0x00000108"}],"symbols":[{"name":"MAIN","segment":"0x0001","offset":"0x00000008","global":true},{"name":"_HELPER","segment":"0x0001","offset":"0x00000088","global":false}]}
 ```
 
 Pretty-printed for readability:
@@ -151,6 +192,7 @@ Pretty-printed for readability:
 ```json
 {
   "orca_symbols_version": "0x0001",
+  "symsig": "0xDEADBEEF",
   "target": "Hello",
   "linker": "ORCA/M Link Editor 2.3.0",
   "segments": [
@@ -159,20 +201,20 @@ Pretty-printed for readability:
       "name": "Hello",
       "type": "code",
       "org": "0x00000000",
-      "length": "0x00000100"
+      "length": "0x00000108"
     }
   ],
   "symbols": [
     {
       "name": "MAIN",
       "segment": "0x0001",
-      "offset": "0x00000000",
+      "offset": "0x00000008",
       "global": true
     },
     {
       "name": "_HELPER",
       "segment": "0x0001",
-      "offset": "0x00000080",
+      "offset": "0x00000088",
       "global": false
     }
   ]
@@ -210,9 +252,18 @@ To resolve a runtime address to a symbol name:
 - The `orca_symbols_version` field allows for future format changes.
   Current version is `"0x0001"`. If the version is unrecognised, the
   emulator should ignore the file rather than crash.
+- `symsig` is a 32-bit value encoded as an 8-digit hex string with `0x`
+  prefix. The same value appears little-endian at bytes 4–7 of the WDM
+  prologue in the binary. To read it from the binary: treat the 4 bytes
+  starting at `PC+4` (where PC points to the WDM instruction) as a
+  little-endian 32-bit integer. That integer equals
+  `strtoul(symsig, NULL, 16)`.
 - Symbol names are stored in uppercase per ORCA convention (ORCA/M
   assembler uppercases all identifiers). Source-level names like `main`
   or `_helper` become `MAIN` and `_HELPER`.
+- All symbol `offset` values in segment 1 are ≥ 8 because the 8-byte
+  WDM prologue is at offsets 0–7. The first user symbol starts at
+  offset `0x00000008`.
 - The `segment` field in symbol objects refers to the segment number
   assigned during pass 1 of the link. This may differ from the final
   segment `number` in the segments array by 1 (due to the linker's

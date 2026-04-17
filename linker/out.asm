@@ -2287,6 +2287,7 @@ nameEnd	anop
 NewSegment private
 	using Common
 	using OutCommon
+	using GsplusCommon
 
 	move	#0,loadNext,#loadSize
 	move4 loadNamePtr,r0
@@ -2301,7 +2302,19 @@ lb1	lda	[r0],Y
 	sta	loadNumber
 	stz	pc
 	stz	pc+2
-	rts
+;
+;  If this is the first code segment and gsplusSymbols is active,
+;  pre-advance pc by 8 to account for the WDM prologue that
+;  Pass2Prep will inject.  This keeps all pass-1 symbol offsets
+;  consistent with the pass-2 buffer layout.
+;
+	lda	sfGsplusEnabled
+	beq	ns1
+	lda	loadNumber
+	cmp	#1
+	bne	ns1
+	la	pc,8
+ns1	rts
 	end
 
 ****************************************************************
@@ -2481,6 +2494,7 @@ lb12	lda	r0	op = opst = r0
 Pass2Prep private
 	using Common
 	using OutCommon
+	using GsplusCommon
 
 	lda	pass	if this is not pass 2
 	cmp	#2
@@ -2536,7 +2550,48 @@ lb3	pl4	loadSeg
 	stz	loadAlign+2
 	stz	pc	pc = 0
 	stz	pc+2
-	inc	loadPass2	loadPass2 = true
+;
+;  If this is segment 1 and gsplusSymbols is active, write the
+;  8-byte WDM prologue into the segment buffer and advance op/pc.
+;
+;  Layout:
+;    $42 $0F        WDM $0F  (2 bytes)
+;    $80 $04        BRA +4   (2 bytes; skips the 4-byte signature)
+;    sfSig[0..3]    32-bit link signature (4 bytes)
+;
+	lda	sfGsplusEnabled
+	beq	p2p1
+	lda	loadNumber
+	cmp	#1
+	bne	p2p1
+	short	M
+	lda	#$42		WDM opcode
+	sta	[op]
+	ldy	#1
+	lda	#$0F		WDM operand
+	sta	[op],Y
+	ldy	#2
+	lda	#$80		BRA opcode
+	sta	[op],Y
+	ldy	#3
+	lda	#$04		BRA offset +4 (skips 4-byte signature to offset 8)
+	sta	[op],Y
+	lda	sfSig		signature byte 0
+	ldy	#4
+	sta	[op],Y
+	lda	sfSig+1		signature byte 1
+	ldy	#5
+	sta	[op],Y
+	lda	sfSig+2		signature byte 2
+	ldy	#6
+	sta	[op],Y
+	lda	sfSig+3		signature byte 3
+	ldy	#7
+	sta	[op],Y
+	long	M
+	add4	op,#8		advance op past the prologue
+	la	pc,8		pc = 8: matches pass-1 symbol offsets
+p2p1	inc	loadPass2	loadPass2 = true
 	rts
 	end
 

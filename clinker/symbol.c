@@ -14,6 +14,12 @@
 
 Symbol *symHash[SYM_HASH_SIZE];
 
+/* Set by pass1's library-search path while processing a lib segment, so
+ * SymRequest can tag new requests with their originating library and
+ * MakeLib-internal file number. */
+LibFile *currentRequestLib     = NULL;
+int      currentRequestFileNum = 0;
+
 unsigned int SymHash(const char *name)
 {
 unsigned int h = 0;
@@ -69,6 +75,15 @@ if (pass == 1)
     s->flags |= SYM_PASS1_REQUESTED;
 else
     s->flags |= SYM_PASS2_REQUESTED;
+
+/* Record the originating (library, MakeLib-file) on first internal
+ * request so LibrarySearch can match private dict entries against
+ * the same scope.  First-wins: once set, the scope doesn't change,
+ * which matches iix's per-file symFile tagging. */
+if (!s->reqLib && currentRequestLib) {
+    s->reqLib     = currentRequestLib;
+    s->reqFileNum = currentRequestFileNum;
+    }
 }
 
 void SymDump(void)

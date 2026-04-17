@@ -445,6 +445,8 @@ for (;;) {
     if (diskLen == 0) { free(seg); break; }
 
     if (SegDefinesNeededSym(lf->fp, seg)) {
+        LibFile *prev;
+
         inf = (InputFile *)malloc(sizeof(InputFile));
         if (!inf) FatalError("out of memory (LibInputFile)");
         memset(inf, 0, sizeof(InputFile));
@@ -458,7 +460,10 @@ for (;;) {
         else             inputTail->next = inf;
         inputTail = inf;
 
+        prev = currentRequestLib;
+        currentRequestLib = lf;
         Pass1Seg(inf, seg);
+        currentRequestLib = prev;
         }
     else free(seg);
 
@@ -469,11 +474,19 @@ fseek(lf->fp, 0L, SEEK_SET);
 }
 
 /* Dictionary-driven pull: fetch one specific segment from lf by its
- * header file offset, add it to inputFiles, and pass-1 it. */
-static void PullLibSegment(LibFile *lf, long segOff, int *seqCounter)
+ * header file offset, add it to inputFiles, and pass-1 it.  While the
+ * segment is being processed we set (currentRequestLib, currentRequestFileNum)
+ * so any SymRequest calls from within that segment's body get tagged
+ * with the MakeLib-internal file that contained the segment — this
+ * lets LibrarySearch match private dict entries under iix's scoping
+ * rule. */
+static void PullLibSegment(LibFile *lf, long segOff, int libFileNum,
+                           int *seqCounter)
 {
 InSeg     *seg;
 InputFile *inf;
+LibFile   *prevLib;
+int        prevFile;
 
 seg = (InSeg *)malloc(sizeof(InSeg));
 if (!seg) FatalError("out of memory (LibSeg)");
@@ -499,7 +512,13 @@ if (!inputFiles) inputFiles = inf;
 else             inputTail->next = inf;
 inputTail = inf;
 
+prevLib  = currentRequestLib;
+prevFile = currentRequestFileNum;
+currentRequestLib     = lf;
+currentRequestFileNum = libFileNum;
 Pass1Seg(inf, seg);
+currentRequestLib     = prevLib;
+currentRequestFileNum = prevFile;
 }
 
 /* ----------------------------------------------------------
@@ -533,12 +552,21 @@ do {
             if (sym->flags & SYM_PASS1_RESOLVED)     continue;
 
             for (lf = libFiles; lf; lf = lf->next) {
-                long off;
-                if (!lf->dictValid) continue;   /* legacy path covers these */
-                off = LibDictFind(lf, sym->name);
-                if (off < 0) continue;
+                const LibSymEntry *e;
+                if (!lf->dictValid) continue;  /* legacy path covers these */
+                e = LibDictLookup(lf, sym->name);
+                if (!e) continue;
 
-                PullLibSegment(lf, off, &libFileSeq);
+                /* Public dict entries always match.  Private entries
+                 * match only when the request came from within the
+                 * SAME MakeLib-internal file as the entry (iix's
+                 * per-file scoping rule). */
+                if (e->isPrivate) {
+                    if (sym->reqLib != lf)              continue;
+                    if (sym->reqFileNum != e->fileNum)  continue;
+                    }
+
+                PullLibSegment(lf, e->segOffset, e->fileNum, &libFileSeq);
                 changed = TRUE;
                 break;    /* first library wins */
                 }
@@ -546,12 +574,16 @@ do {
         }
     } while (changed);
 
-/* Dictionaries don't always list every symbol a library defines —
- * some are emitted inside segments without a dictionary entry but
- * can still satisfy external references.  After the dict-driven pass
- * we sweep every remaining library with the legacy full-rescan for
- * any symbols still unresolved.  The dict path is an optimization;
- * full-rescan is the safety net. */
+/* Legacy full-rescan fallback.  Library dictionaries list only a
+ * subset of the symbols a library actually exports (typically the
+ * well-known entry points); symbols that the ORCA/M compiler emits
+ * as LOCAL inside a pulled segment body are not indexed in the dict
+ * but still need to satisfy cross-segment references during the
+ * link.  The reference linker handles this by walking the raw OMF
+ * record stream and filling in the hash table as it goes — we
+ * approximate by body-scanning every library until no new segment
+ * gets pulled.  This runs after the dict pass so we only sweep
+ * libraries when there are truly-unresolved symbols left. */
 do {
     BOOLEAN anyPending = FALSE;
     InputFile *before, *p;

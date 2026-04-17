@@ -156,12 +156,20 @@ typedef struct OutSeg {
 /* Symbol table entry                                         */
 /* ---------------------------------------------------------- */
 
+struct LibFile;             /* forward tag — full struct below */
+
 typedef struct Symbol {
     char name[NAME_MAX];
     long value;
     int  segNum;
     int  flags;
-    struct Symbol *next;  /* hash chain */
+    struct LibFile *reqLib;   /* first library that requested this symbol */
+    int   reqFileNum;         /* MakeLib-internal file # of the requesting
+                               * lib segment (0 = external / no scope).
+                               * Paired with reqLib to match iix's private-
+                               * dict scoping: two symbols match when both
+                               * share the same (reqLib, reqFileNum). */
+    struct Symbol *next;      /* hash chain */
 } Symbol;
 
 /* ---------------------------------------------------------- */
@@ -221,6 +229,7 @@ extern char    baseName[PATH_MAX];  /* basename of keepName */
 typedef struct LibSymEntry {
     char    name[NAME_MAX];  /* uppercase symbol name */
     long    segOffset;       /* file offset of the defining segment's header */
+    int     fileNum;         /* MakeLib-internal file number (1..N) */
     BOOLEAN isPrivate;       /* private_flag = 1 in the dictionary */
 } LibSymEntry;
 
@@ -289,7 +298,18 @@ void LibrarySearch(void);
 
 /* libdict.c — library dictionary cache + lookup */
 void LibDictInit(LibFile *lf);
+/* LibDictFind: public-only name lookup (private dict entries are rejected). */
 long LibDictFind(LibFile *lf, const char *name);  /* -1 on miss */
+/* LibDictLookup: richer lookup — returns the matching entry (or NULL on miss).
+ * Caller checks isPrivate / fileNum to decide whether the symbol is usable. */
+const LibSymEntry *LibDictLookup(LibFile *lf, const char *name);
+
+/* Set by pass1 while it processes a library-sourced segment.  SymRequest
+ * reads these to tag new symbol requests with their originating library
+ * and MakeLib-internal file number, which LibrarySearch then uses to
+ * scope private-dict matches exactly like iix link does. */
+extern LibFile *currentRequestLib;
+extern int      currentRequestFileNum;
 
 /* pass2.c */
 int  Pass2(void);

@@ -108,6 +108,7 @@ lf->numSyms = 0;
 for (i = 0; i < entryCount; i++) {
     long   off = (long)i * 12;
     dword  nameDisp = ReadLE(symTable, off + 0, 4);
+    word   fileNum  = (word)ReadLE(symTable, off + 4, 2);
     word   privFlag = (word)ReadLE(symTable, off + 6, 2);
     dword  segDisp  = ReadLE(symTable, off + 8, 4);
     int    nLen;
@@ -127,6 +128,7 @@ for (i = 0; i < entryCount; i++) {
         e->name[j] = (char)toupper(symNames[nameDisp + 1 + j]);
     e->name[n]    = 0;
     e->segOffset  = (long)segDisp;
+    e->fileNum    = (int)fileNum;
     e->isPrivate  = (privFlag != 0);
     lf->numSyms++;
     }
@@ -182,30 +184,45 @@ if (opt_progress)
  * parsed dictionary.  Returns the file offset of the defining
  * segment's header, or -1 if the library has no dictionary or the
  * symbol isn't present. */
+/* Binary-search lookup returning the entry index, or -1 on miss. */
+static int FindIndex(LibFile *lf, const char *name)
+{
+int lo = 0;
+int hi = lf->numSyms - 1;
+
+while (lo <= hi) {
+    int mid = (lo + hi) >> 1;
+    int cmp = strcmp(lf->syms[mid].name, name);
+    if (cmp == 0) return mid;
+    if (cmp < 0)  lo = mid + 1;
+    else          hi = mid - 1;
+    }
+return -1;
+}
+
 long LibDictFind(LibFile *lf, const char *name)
 {
-int lo, hi, mid, cmp;
+int idx;
 
 if (!lf) return -1;
 if (!lf->dictLoaded) LibDictInit(lf);
 if (!lf->dictValid)  return -1;
 
-lo = 0;
-hi = lf->numSyms - 1;
-while (lo <= hi) {
-    mid = (lo + hi) >> 1;
-    cmp = strcmp(lf->syms[mid].name, name);
-    if (cmp == 0) {
-        /* Per Appendix F: a private_flag=1 entry's symbol "is valid
-         * only in the object file in which it occurred" — i.e. it
-         * can satisfy references from segments MakeLib pulled from
-         * the same original object, but not an arbitrary external
-         * reference.  Treat those as no-match for external lookups. */
-        if (lf->syms[mid].isPrivate) return -1;
-        return lf->syms[mid].segOffset;
-        }
-    if (cmp < 0)  lo = mid + 1;
-    else          hi = mid - 1;
-    }
-return -1;
+idx = FindIndex(lf, name);
+if (idx < 0)                  return -1;
+if (lf->syms[idx].isPrivate)  return -1;   /* public-only */
+return lf->syms[idx].segOffset;
+}
+
+const LibSymEntry *LibDictLookup(LibFile *lf, const char *name)
+{
+int idx;
+
+if (!lf) return NULL;
+if (!lf->dictLoaded) LibDictInit(lf);
+if (!lf->dictValid)  return NULL;
+
+idx = FindIndex(lf, name);
+if (idx < 0) return NULL;
+return &lf->syms[idx];
 }

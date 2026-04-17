@@ -44,8 +44,8 @@ OUT := $(MAKEFILE_DIR)out
 #               not fail `make all`.  Each should migrate to MUST_PASS as the
 #               corresponding roadmap phase lands.
 TESTS       := minimal reloc
-MUST_PASS   := minimal
-DIVERGE     := reloc
+MUST_PASS   := minimal reloc
+DIVERGE     :=
 
 .PHONY: all clean help $(TESTS:%=test-%) $(DIVERGE:%=diverge-%)
 .DEFAULT_GOAL := all

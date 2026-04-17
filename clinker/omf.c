@@ -418,15 +418,194 @@ else {
     }
 }
 
-/*
- * OmfWriteSuper — emit the entire reloc dictionary for one output
- * segment.  Today this just walks the RelocRec list and writes each
- * entry individually (cRELOC/RELOC/cINTERSEG/INTERSEG).  Phase 9 will
- * group compatible entries and pack them into SUPER records.
- */
-void OmfWriteSuper(FILE *fp, OutSeg *seg)
+/* ----------------------------------------------------------
+   SUPER RELOC2 / RELOC3 packing
+
+   Entries that qualify (type=0, shift=0, patchLen in {2,3}) are
+   grouped into one SUPER record per patchLen.  Everything else
+   falls through to individual cRELOC/RELOC/cINTERSEG/INTERSEG.
+
+   Packing follows Appendix F pp. 463-464: a stream of subrecords,
+   each a Count byte with (count & $80 == 0 -> Count+1 in-page
+   offsets follow) or (count & $80 -> skip (count & $7F) pages).
+
+   Because SUPER reads the reference value from the LCONST at each
+   patch location, OmfSuperPrepare must be called before the LCONST
+   is written so the right bytes are present.
+
+   INTERSEG SUPER subtypes (2..37) are not yet packed here; those
+   still go out as individual cINTERSEG/INTERSEG records.
+   ---------------------------------------------------------- */
+
+static BOOLEAN SuperReloc23Type(const RelocRec *r, byte *outType)
+{
+if (r->type != 0 || r->shift != 0 || r->pc < 0) return FALSE;
+if (r->patchLen == 2) { if (outType) *outType = 0x00; return TRUE; }
+if (r->patchLen == 3) { if (outType) *outType = 0x01; return TRUE; }
+return FALSE;
+}
+
+/* Collect, in ascending-pc order, every RelocRec in `seg` that packs
+ * into SUPER subtype `superType`.  Returns offset array (caller frees)
+ * and count via *outCount.  Caller receives NULL/0 when none match. */
+static long *CollectSuperOffsets(const OutSeg *seg, byte superType,
+                                 int *outCount)
+{
+long     *arr;
+int       count = 0;
+int       i;
+RelocRec *r;
+
+for (r = seg->relocHead; r; r = r->next) {
+    byte t;
+    if (SuperReloc23Type(r, &t) && t == superType) count++;
+    }
+
+*outCount = count;
+if (count == 0) return NULL;
+
+arr = (long *)malloc((size_t)count * sizeof(long));
+if (!arr) return NULL;  /* caller treats as empty */
+
+i = 0;
+for (r = seg->relocHead; r; r = r->next) {
+    byte t;
+    if (SuperReloc23Type(r, &t) && t == superType) arr[i++] = r->pc;
+    }
+
+/* Insertion sort (reloc counts per segment are small). */
+for (i = 1; i < count; i++) {
+    long v = arr[i];
+    int  j = i;
+    while (j > 0 && arr[j - 1] > v) { arr[j] = arr[j - 1]; j--; }
+    arr[j] = v;
+    }
+
+return arr;
+}
+
+/* Bytes required by the packed subrecord stream (excluding the leading
+ * opcode, 4-byte length, and 1-byte type).  Mirrors the walk in
+ * EmitSuperStream below. */
+static long PackedSuperBytes(const long *offs, int n)
+{
+long bytes = 0;
+int  i = 0;
+int  page = 0;
+
+while (i < n) {
+    int targetPage = (int)(offs[i] >> 8);
+    int start, pageCount;
+
+    /* Each skip marker jumps up to 127 pages */
+    while (page < targetPage) {
+        int skip = targetPage - page;
+        if (skip > 0x7F) skip = 0x7F;
+        bytes += 1;                  /* skip byte */
+        page  += skip;
+        }
+
+    start = i;
+    while (i < n && (long)(offs[i] >> 8) == (long)page) i++;
+    pageCount = i - start;
+    bytes += 1 + pageCount;           /* count + N offsets */
+    page++;
+    }
+
+return bytes;
+}
+
+static void EmitSuperStream(FILE *fp, byte superType,
+                            const long *offs, int n)
+{
+long streamBytes = PackedSuperBytes(offs, n);
+int  i = 0;
+int  page = 0;
+
+OmfWriteByte (fp, OP_SUPER);
+OmfWriteDword(fp, 1L + streamBytes);   /* length = type byte + stream */
+OmfWriteByte (fp, (int)superType);
+
+while (i < n) {
+    int targetPage = (int)(offs[i] >> 8);
+    int start, pageCount, k;
+
+    while (page < targetPage) {
+        int skip = targetPage - page;
+        if (skip > 0x7F) skip = 0x7F;
+        OmfWriteByte(fp, 0x80 | skip);
+        page += skip;
+        }
+
+    start = i;
+    while (i < n && (long)(offs[i] >> 8) == (long)page) i++;
+    pageCount = i - start;
+    OmfWriteByte(fp, pageCount - 1);   /* stored as count-1 */
+    for (k = start; k < i; k++)
+        OmfWriteByte(fp, (int)(offs[k] & 0xFF));
+    page++;
+    }
+}
+
+/* Total bytes the SUPER emission will write for this segment (SUPER
+ * records for RELOC2/RELOC3 + individual records for everything else). */
+long OmfSuperBytes(const OutSeg *seg)
+{
+long       bytes = 0;
+int        n;
+long      *arr;
+RelocRec  *r;
+byte       t;
+
+arr = CollectSuperOffsets(seg, 0x00, &n);
+if (n > 0) { bytes += 1 + 4 + 1 + PackedSuperBytes(arr, n); free(arr); }
+
+arr = CollectSuperOffsets(seg, 0x01, &n);
+if (n > 0) { bytes += 1 + 4 + 1 + PackedSuperBytes(arr, n); free(arr); }
+
+for (r = seg->relocHead; r; r = r->next) {
+    if (SuperReloc23Type(r, &t)) continue;  /* packed */
+    bytes += OmfRelocSize(r);
+    }
+
+return bytes;
+}
+
+/* Populate seg->data at each SUPER-packable patch location with the
+ * reference value from the matching RelocRec.  Call before writing the
+ * LCONST so that SUPER's "value lives in LCONST" contract holds at
+ * load time. */
+void OmfPrepareSuper(OutSeg *seg)
 {
 RelocRec *r;
-for (r = seg->relocHead; r; r = r->next)
+int       i;
+byte      t;
+
+for (r = seg->relocHead; r; r = r->next) {
+    if (!SuperReloc23Type(r, &t)) continue;
+    if (r->pc + r->patchLen > seg->dataLen) continue;
+    for (i = 0; i < r->patchLen; i++)
+        seg->data[r->pc + i] = (byte)(r->value >> (i * 8));
+    }
+}
+
+void OmfWriteSuper(FILE *fp, OutSeg *seg)
+{
+long      *arr;
+int        n;
+RelocRec  *r;
+byte       t;
+
+arr = CollectSuperOffsets(seg, 0x00, &n);
+if (n > 0) { EmitSuperStream(fp, 0x00, arr, n); free(arr); }
+
+arr = CollectSuperOffsets(seg, 0x01, &n);
+if (n > 0) { EmitSuperStream(fp, 0x01, arr, n); free(arr); }
+
+/* Everything that didn't pack — INTERSEG, shift != 0, out-of-range
+ * pc/value for RELOC2/3 — gets emitted individually. */
+for (r = seg->relocHead; r; r = r->next) {
+    if (SuperReloc23Type(r, &t)) continue;
     OmfWriteReloc(fp, r);
+    }
 }

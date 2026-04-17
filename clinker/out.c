@@ -29,19 +29,19 @@
  * BodyBytes — number of bytes the body of `seg` will occupy when written
  * with WriteSegBody, *excluding* the fixed segment header.
  *
- *   reloc records: RELOC = 11 bytes, INTERSEG = 15 bytes
- *   data:          LCONST ($F2) + 4-byte length + dataLen bytes
- *   trailer:       END ($00) = 1 byte
+ *   data:     LCONST ($F2) + 4-byte length + dataLen bytes
+ *   relocs:   bytes reported by OmfSuperBytes (covers SUPER packing of
+ *             RELOC2/RELOC3 plus individual cRELOC/RELOC/cINTERSEG/
+ *             INTERSEG records for everything that didn't pack)
+ *   trailer:  END ($00) = 1 byte
  *
  * An empty segment still has an END, so the minimum is 1.
  */
 static long BodyBytes(const OutSeg *seg)
 {
 long n = 0;
-RelocRec *r;
 
-for (r = seg->relocHead; r; r = r->next)
-    n += OmfRelocSize(r);
+n += OmfSuperBytes(seg);
 
 if (seg->dataLen > 0)
     n += 1L + 4L + seg->dataLen + 1L;    /* LCONST frame + END */
@@ -60,12 +60,18 @@ return n;
  */
 static void WriteSegBody(FILE *fp, OutSeg *seg)
 {
+/* SUPER RELOC2/RELOC3 read their reference values straight out of the
+ * LCONST at each patch location, so we must write those values into
+ * seg->data before emitting the LCONST.  For entries that won't be
+ * SUPER-packed, OmfPrepareSuper is a no-op. */
+OmfPrepareSuper(seg);
+
 if (seg->dataLen > 0) {
     OmfWriteByte (fp, OP_LCONST);
     OmfWriteDword(fp, seg->dataLen);
     fwrite(seg->data, 1, (size_t)seg->dataLen, fp);
     }
-OmfWriteSuper(fp, seg);  /* emits each RelocRec as RELOC/INTERSEG */
+OmfWriteSuper(fp, seg);   /* SUPER for RELOC2/3, cRELOC/cINTERSEG for rest */
 OmfWriteByte(fp, OP_END);
 }
 

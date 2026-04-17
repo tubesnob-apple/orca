@@ -23,8 +23,8 @@ INSTALL_SH   ?= $(MAKEFILE_DIR)/../../goldengate/install.sh
 IIX      := iix
 CHTYP    := iix chtyp
 ifeq ($(USE_CLINKER),1)
-LINK      := iix clinker
-LINK_LIBS := lib=$(GG_ROOT)/Libraries/PasLib lib=$(GG_ROOT)/Libraries/SysLib lib=$(GG_ROOT)/Libraries/ORCALib
+LINK      := iix $(if $(CLINKER_BIN),$(CLINKER_BIN),clinker)
+LINK_LIBS := lib=$(GG_ROOT)/Libraries/PasLib lib=$(GG_ROOT)/Libraries/SysLib lib=$(GG_ROOT)/Libraries/SysFloat lib=$(GG_ROOT)/Libraries/ORCALib
 else
 LINK      := iix link
 LINK_LIBS :=

@@ -182,14 +182,31 @@ for (;;) {
         pc += (long)pLen;
         }
     else if (op == OP_ENTRY) {
-        /* ENTRY ($F4): word(reserved) + dword(value) + pstring(name) */
-        word  w;
-        dword v;
-        int   nlen;
-        OmfReadWord(fp, &w);
-        OmfReadDword(fp, &v);
-        nlen = fgetc(fp);
-        if (nlen != EOF) fseek(fp, nlen, SEEK_CUR);
+        /* ENTRY ($F4): word(reserved) + dword(value) + pstring(name).
+         *
+         * Appendix F Table F-3 lists ENTRY as valid only in run-time
+         * library dictionaries, but ORCA/Pascal uses it inside regular
+         * object files too — it's how the compiler exposes nested
+         * procedures as named entry points within their enclosing
+         * segment.  The name resolves to (seg_base + value) and is
+         * visible to INTERSEG references from other segments, the
+         * same as a GLOBAL symbol.
+         *
+         * Without this SymDefine, linking real ORCA/C output fails
+         * with hundreds of "undefined symbol" errors for names like
+         * OUT, CNOUT, HASH, SAVEBF that Pascal emits as ENTRY
+         * records. */
+        char   name[NAME_MAX];
+        char  *p;
+        word   reserved;
+        dword  value;
+        OmfReadWord(fp, &reserved);
+        OmfReadDword(fp, &value);
+        OmfReadPString(fp, name, NAME_MAX);
+        for (p = name; *p; p++) *p = (char)toupper(*p);
+        if (name[0])
+            SymDefine(name, seg->baseOffset + (long)value,
+                      seg->outSegNum, SYM_PASS1_RESOLVED);
         }
     else if (op == OP_RELOC) {
         /* pLen(1) shift(1) pc(4) value(4) = 10 more bytes */
@@ -412,11 +429,22 @@ for (;;) {
         SkipExpr(fp, EXPR_PHASE_COLLECT);
         }
     else if (op == OP_ENTRY) {
-        word  w; dword v; int nlen;
-        OmfReadWord(fp, &w);
-        OmfReadDword(fp, &v);
-        nlen = fgetc(fp);
-        if (nlen != EOF) fseek(fp, nlen, SEEK_CUR);
+        /* ENTRY defines a named entry point within the segment.
+         * If a requested symbol matches this name, the segment
+         * satisfies the request — pull it. */
+        char   name[NAME_MAX];
+        char  *p;
+        word   reserved;
+        dword  value;
+        Symbol *sym;
+        OmfReadWord(fp, &reserved);
+        OmfReadDword(fp, &value);
+        OmfReadPString(fp, name, NAME_MAX);
+        for (p = name; *p; p++) *p = (char)toupper(*p);
+        sym = SymFind(name);
+        if (sym && (sym->flags & SYM_PASS1_REQUESTED) &&
+                   !(sym->flags & SYM_PASS1_RESOLVED))
+            return 1;
         }
     else if (op == OP_STRONG || op == OP_USING || op == OP_MEM) {
         if (op == OP_MEM) { fseek(fp, 8, SEEK_CUR); }

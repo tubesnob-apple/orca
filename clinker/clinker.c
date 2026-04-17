@@ -287,65 +287,58 @@ for (i = 1; i <= argc; i++) {
         /* Input file.
          *
          * When the argument has no extension, the ORCA convention is
-         * that <name>.ROOT (data / privdata / main code) comes first
-         * and <name>.A (other code segments) second — ORCA/M wrote the
-         * root segment before any `start` segments, and the reference
-         * linker preserves that order.  So when we see a bare name we
-         * add .ROOT first (if it exists), then .a / .A.
+         * that three OMF files may share the stem:
+         *     <name>.ROOT   — root/data segments (Pascal compile output)
+         *     <name>.a      — code segments (Pascal compile output)
+         *     <name>.B      — segments assembled from a companion .asm
+         *                     file that the Pascal compiler auto-
+         *                     assembles alongside .pas compilation
+         *                     (e.g. ObjOut.asm contributes CnOut/Out/
+         *                     COut segments to obj/objout.B)
+         * We open them in that order so the link iteration processes
+         * root segments before code, matching iix link's behaviour.
          *
          * If the argument has an explicit extension, open it literally
          * and don't try any siblings. */
         int  noExt = !strchr(arg, '.');
         char tryName[PATH_MAX];
         int  added = 0;
+        static const char *exts[] = { ".ROOT", ".root",
+                                      ".a",    ".A",
+                                      ".B",    ".b",
+                                      NULL };
+        static const int   groupEnd[] = { 2, 4, 6 };  /* first ext per group */
 
         if (noExt) {
-            /* .ROOT first */
-            FILE *fp;
-            snprintf(tryName, sizeof(tryName), "%s.ROOT", arg);
-            fp = fopen(tryName, "rb");
-            if (!fp) {
-                snprintf(tryName, sizeof(tryName), "%s.root", arg);
-                fp = fopen(tryName, "rb");
-                }
-            if (fp) {
-                InputFile *inf = (InputFile *)malloc(sizeof(InputFile));
-                if (!inf) FatalError("out of memory (InputFile)");
-                memset(inf, 0, sizeof(InputFile));
-                inf->fp      = fp;
-                inf->fileNum = ++fileSeq;
-                strncpy(inf->name, tryName, PATH_MAX - 1);
-                if (!inputFiles) inputFiles = inf;
-                else             tail->next = inf;
-                tail      = inf;
-                inputTail = inf;
-                added++;
-                }
-
-            /* then .a / .A */
-            fp = NULL;
-            snprintf(tryName, sizeof(tryName), "%s.a", arg);
-            fp = fopen(tryName, "rb");
-            if (!fp) {
-                snprintf(tryName, sizeof(tryName), "%s.A", arg);
-                fp = fopen(tryName, "rb");
-                }
-            if (fp) {
-                InputFile *inf = (InputFile *)malloc(sizeof(InputFile));
-                if (!inf) FatalError("out of memory (InputFile)");
-                memset(inf, 0, sizeof(InputFile));
-                inf->fp      = fp;
-                inf->fileNum = ++fileSeq;
-                strncpy(inf->name, tryName, PATH_MAX - 1);
-                if (!inputFiles) inputFiles = inf;
-                else             tail->next = inf;
-                tail      = inf;
-                inputTail = inf;
-                added++;
+            int g, i;
+            /* Try each sibling family (ROOT → .a/.A → .B), adding
+             * the first match in each family. */
+            for (g = 0; g < (int)(sizeof groupEnd / sizeof groupEnd[0]); g++) {
+                int start = (g == 0) ? 0 : groupEnd[g - 1];
+                int stop  = groupEnd[g];
+                FILE *fp = NULL;
+                for (i = start; i < stop && !fp; i++) {
+                    snprintf(tryName, sizeof(tryName), "%s%s", arg, exts[i]);
+                    fp = fopen(tryName, "rb");
+                    }
+                if (fp) {
+                    InputFile *inf = (InputFile *)malloc(sizeof(InputFile));
+                    if (!inf) FatalError("out of memory (InputFile)");
+                    memset(inf, 0, sizeof(InputFile));
+                    inf->fp      = fp;
+                    inf->fileNum = ++fileSeq;
+                    strncpy(inf->name, tryName, PATH_MAX - 1);
+                    if (!inputFiles) inputFiles = inf;
+                    else             tail->next = inf;
+                    tail      = inf;
+                    inputTail = inf;
+                    added++;
+                    }
                 }
 
             if (added == 0) {
-                fprintf(stderr, "clinker: cannot open: %s(.ROOT|.a|.A)\n", arg);
+                fprintf(stderr,
+                        "clinker: cannot open: %s(.ROOT|.a|.A|.B)\n", arg);
                 numErrors++;
                 }
             }

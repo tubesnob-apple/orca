@@ -19,7 +19,7 @@ INSTALL_SH   ?= $(MAKEFILE_DIR)/../../goldengate/install.sh
 
 CC       := iix compile
 ifeq ($(USE_CLINKER),1)
-LINK     := iix clinker
+LINK     := iix $(if $(CLINKER_BIN),$(CLINKER_BIN),clinker)
 else
 LINK     := iix link
 endif

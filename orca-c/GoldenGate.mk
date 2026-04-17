@@ -22,8 +22,8 @@
 IIX      := iix
 CHTYP    := iix chtyp
 ifeq ($(USE_CLINKER),1)
-LINK      := iix clinker
-LINK_LIBS := lib=$(GG_ROOT)/Libraries/PasLib lib=$(GG_ROOT)/Libraries/ORCALib lib=$(GG_ROOT)/Libraries/SysLib
+LINK      := iix $(if $(CLINKER_BIN),$(CLINKER_BIN),clinker)
+LINK_LIBS := lib=$(GG_ROOT)/Libraries/PasLib lib=$(GG_ROOT)/Libraries/ORCALib lib=$(GG_ROOT)/Libraries/SysFloat lib=$(GG_ROOT)/Libraries/SysLib
 else
 LINK      := iix link
 LINK_LIBS :=

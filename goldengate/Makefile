@@ -84,7 +84,9 @@ GMAKE := $(shell command -v gmake 2>/dev/null || command -v make)
 
 # Common args passed to all sub-makes
 # Set USE_CLINKER=1 to link with iix clinker instead of iix link.
-SUBMAKE_ARGS := BIN_DIR=$(BIN_DIR) VERSION=$(VERSION) INSTALL_SH=$(INSTALL_SH) GG_ROOT=$(GG_ROOT) USE_CLINKER=$(USE_CLINKER)
+# CLINKER_BIN optionally points at a clinker binary by path, so the
+# sub-builds can exercise an uninstalled clinker via `iix <absolute path>`.
+SUBMAKE_ARGS := BIN_DIR=$(BIN_DIR) VERSION=$(VERSION) INSTALL_SH=$(INSTALL_SH) GG_ROOT=$(GG_ROOT) USE_CLINKER=$(USE_CLINKER) CLINKER_BIN=$(CLINKER_BIN)
 
 .PHONY: all install clean
 .PHONY: orcalib orcalib-install orcalib-clean

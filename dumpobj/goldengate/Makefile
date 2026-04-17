@@ -18,7 +18,11 @@ BIN_DIR      ?= $(MAKEFILE_DIR)
 INSTALL_SH   ?= $(MAKEFILE_DIR)/../../goldengate/install.sh
 
 CC       := iix compile
+ifeq ($(USE_CLINKER),1)
+LINK     := iix clinker
+else
 LINK     := iix link
+endif
 
 # ── GoldenGate root ──────────────────────────────────────────────────────────
 OS := $(shell uname -s 2>/dev/null || echo Windows)
@@ -47,10 +51,16 @@ $(OBJ_DIR)/dumpobj.a: $(SRC_DIR)/DumpOBJ.cc | $(OBJ_DIR)
 	@echo "=== compile DumpOBJ.cc ==="
 	cd $(OBJ_DIR) && $(CC) $(SRC_DIR)/DumpOBJ.cc
 
+ifeq ($(USE_CLINKER),1)
+LINK_LIBS := lib=$(GG_ROOT)/Libraries/ORCALib lib=$(GG_ROOT)/Libraries/SysFloat lib=$(GG_ROOT)/Libraries/SysLib
+else
+LINK_LIBS :=
+endif
+
 # ── Link ──────────────────────────────────────────────────────────────────────
 $(BIN_OUT): $(OBJ_DIR)/dumpobj.a | $(BIN_DIR)
 	@echo "=== link DumpObj ==="
-	cd $(OBJ_DIR) && $(LINK) -o $(BIN_OUT) dumpobj
+	cd $(OBJ_DIR) && $(LINK) -o $(BIN_OUT) dumpobj $(LINK_LIBS)
 	iix chtyp -t exe -a 0xDB01 $(BIN_OUT)
 
 $(OBJ_DIR):

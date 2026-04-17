@@ -21,6 +21,13 @@
 
 IIX      := iix
 CHTYP    := iix chtyp
+ifeq ($(USE_CLINKER),1)
+LINK      := iix clinker
+LINK_LIBS := lib=$(GG_ROOT)/Libraries/PasLib lib=$(GG_ROOT)/Libraries/ORCALib lib=$(GG_ROOT)/Libraries/SysLib
+else
+LINK      := iix link
+LINK_LIBS :=
+endif
 PASFLAGS := +T -P
 ASMFLAGS := +T -P
 OBJ      := obj
@@ -52,21 +59,23 @@ OBJS := \
 all: $(OBJS)
 
 link: $(OBJS)
-	$(IIX) link \
+	$(LINK) \
 	  $(OBJ)/cc $(OBJ)/symbol $(OBJ)/parser $(OBJ)/expression \
 	  $(OBJ)/scanner $(OBJ)/mm $(OBJ)/ccommon $(OBJ)/cgi $(OBJ)/cgc \
 	  $(OBJ)/asm $(OBJ)/table $(OBJ)/objout $(OBJ)/native \
 	  $(OBJ)/dag $(OBJ)/gen $(OBJ)/header \
 	  $(OBJ)/charset $(OBJ)/printf \
+	  $(LINK_LIBS) \
 	  keep=$(BIN_DIR)/cc
 
 install: $(OBJS)
-	$(IIX) link \
+	$(LINK) \
 	  $(OBJ)/cc $(OBJ)/symbol $(OBJ)/parser $(OBJ)/expression \
 	  $(OBJ)/scanner $(OBJ)/mm $(OBJ)/ccommon $(OBJ)/cgi $(OBJ)/cgc \
 	  $(OBJ)/asm $(OBJ)/table $(OBJ)/objout $(OBJ)/native \
 	  $(OBJ)/dag $(OBJ)/gen $(OBJ)/header \
 	  $(OBJ)/charset $(OBJ)/printf \
+	  $(LINK_LIBS) \
 	  keep=16/cc
 
 $(OBJ):

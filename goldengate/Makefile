@@ -83,7 +83,8 @@ VERSION         := $(BASE_VERSION)-$(BUILD_TIMESTAMP)
 GMAKE := $(shell command -v gmake 2>/dev/null || command -v make)
 
 # Common args passed to all sub-makes
-SUBMAKE_ARGS := BIN_DIR=$(BIN_DIR) VERSION=$(VERSION) INSTALL_SH=$(INSTALL_SH) GG_ROOT=$(GG_ROOT)
+# Set USE_CLINKER=1 to link with iix clinker instead of iix link.
+SUBMAKE_ARGS := BIN_DIR=$(BIN_DIR) VERSION=$(VERSION) INSTALL_SH=$(INSTALL_SH) GG_ROOT=$(GG_ROOT) USE_CLINKER=$(USE_CLINKER)
 
 .PHONY: all install clean
 .PHONY: orcalib orcalib-install orcalib-clean
@@ -101,18 +102,18 @@ SUBMAKE_ARGS := BIN_DIR=$(BIN_DIR) VERSION=$(VERSION) INSTALL_SH=$(INSTALL_SH) G
 
 # ── Default: build everything ─────────────────────────────────────────────────
 
-all: orcalib paslib syslib sysfloat sysfpefloat linker dumpobj makelib orca-pascal orca-c clinker
+all: orcalib paslib syslib sysfloat sysfpefloat linker dumpobj makelib orca-pascal orca-c
 	@echo "Build complete — version $(VERSION)"
 	@echo "Binaries staged in $(BIN_DIR)/"
 
 # ── Install everything ────────────────────────────────────────────────────────
 
-install: orcalib-install paslib-install syslib-install sysfloat-install sysfpefloat-install linker-install dumpobj-install makelib-install orca-pascal-install orca-c-install clinker-install
+install: orcalib-install paslib-install syslib-install sysfloat-install sysfpefloat-install linker-install dumpobj-install makelib-install orca-pascal-install orca-c-install
 	@echo "Install complete — version $(VERSION)"
 
 # ── Clean everything ──────────────────────────────────────────────────────────
 
-clean: orcalib-clean paslib-clean syslib-clean sysfloat-clean sysfpefloat-clean linker-clean dumpobj-clean makelib-clean orca-pascal-clean orca-c-clean clinker-clean
+clean: orcalib-clean paslib-clean syslib-clean sysfloat-clean sysfpefloat-clean linker-clean dumpobj-clean makelib-clean orca-pascal-clean orca-c-clean
 	rm -rf $(BIN_DIR)
 
 # ── Version stamping ──────────────────────────────────────────────────────────

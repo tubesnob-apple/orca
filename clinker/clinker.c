@@ -35,7 +35,7 @@
 
 BOOLEAN  opt_list     = FALSE;
 BOOLEAN  opt_symbols  = FALSE;
-BOOLEAN  opt_express  = TRUE;
+BOOLEAN  opt_express  = FALSE; /* express loading requires separate reloc dict; disabled until implemented */
 BOOLEAN  opt_pause    = FALSE;
 BOOLEAN  opt_memory   = FALSE;
 BOOLEAN  opt_compact  = TRUE;
@@ -47,6 +47,8 @@ char     baseName[PATH_MAX] = "";
 
 int      numErrors  = 0;
 InputFile *inputFiles = NULL;
+InputFile *inputTail  = NULL;
+LibFile   *libFiles   = NULL;
 OutSeg    *outSegs    = NULL;
 int        numOutSegs = 0;
 dword      sfSig      = 0;
@@ -298,13 +300,6 @@ OmfWriteWord(fp, 1);
 OmfWriteDword(fp, dataSegOffset);
 /* END */
 OmfWriteByte(fp, OP_END);
-
-/* Pad to 512-byte block boundary */
-{
-long pos     = ftell(fp);
-long padding = (512L - (pos % 512L)) % 512L;
-while (padding-- > 0) OmfWriteByte(fp, 0);
-}
 }
 
 /* ----------------------------------------------------------
@@ -328,33 +323,36 @@ if (!fp) {
     }
 
 if (opt_express) {
-    /* Express-load segment goes first; we need its body size to    *
-     * know where the data starts.  For now write a placeholder and *
-     * fix up later -- or simply reserve space.                     *
-     * Simple approach: write a 512-byte placeholder, then data,    *
-     * then fix up the express seg with the correct offset.        */
-    long exprStart = ftell(fp);
-    int  i;
-    for (i = 0; i < 512; i++) fputc(0, fp);
+    /* Express segment goes first.  Compute its exact byte count so we can
+     * write a same-size placeholder, fill in data segments, then fix up. */
+    long exprSegLen   = (long)strlen("~ExpressLoad");
+    long exprPadSeg   = (1 + exprSegLen) & 1;
+    long exprBodyDisp = 44L + 10
+                             + 1 + exprSegLen + exprPadSeg;
+    long exprTotalLen = exprBodyDisp + 7L;  /* body: word + dword + END */
+    long exprStart    = ftell(fp);
+    long i;
+
+    for (i = 0; i < exprTotalLen; i++) fputc(0, fp);
 
     long dataStart = ftell(fp);
 
     for (seg = outSegs; seg; seg = seg->next) {
-        long pad;
         RelocRec *r;
 
-        /* Compute body length: reloc records + data + END */
+        /* Compute body length: reloc records + data frame + END */
         bodyLen = 0;
         for (r = seg->relocHead; r; r = r->next)
-            bodyLen += (r->type == 0) ? 11L : 16L;  /* RELOC or INTERSEG */
-        bodyLen += seg->dataLen + 1;  /* data + END */
+            bodyLen += (r->type == 0) ? 11L : 15L;
+        if (seg->dataLen > 0xDF)
+            bodyLen += 6L + seg->dataLen;  /* LCONST(1)+len(4)+data+END */
+        else if (seg->dataLen > 0)
+            bodyLen += 2L + seg->dataLen;  /* opcode(1)+data+END */
+        else
+            bodyLen += 1L;                 /* END only */
 
         OmfWriteSegHeader(fp, seg, bodyLen, ++segNum, baseName);
 
-        /* Emit reloc records */
-        OmfWriteSuper(fp, seg);
-
-        /* Emit data as LCONST if > $DF bytes, else as Const records */
         if (seg->dataLen > 0) {
             if (seg->dataLen > 0xDF) {
                 OmfWriteByte (fp, OP_LCONST);
@@ -365,17 +363,11 @@ if (opt_express) {
                 fwrite(seg->data, 1, (size_t)seg->dataLen, fp);
                 }
             }
+        OmfWriteSuper(fp, seg);
         OmfWriteByte(fp, OP_END);
-
-        /* Pad segment to 512-byte block boundary */
-        {
-        long pos = ftell(fp);
-        pad = (512L - (pos % 512L)) % 512L;
-        while (pad-- > 0) OmfWriteByte(fp, 0);
-        }
         }
 
-    /* Fix up the express-load segment */
+    /* Fix up the express-load segment placeholder */
     {
     long savedPos = ftell(fp);
     fseek(fp, exprStart, SEEK_SET);
@@ -385,16 +377,19 @@ if (opt_express) {
     } else {
     /* No express segment: just write data segments directly */
     for (seg = outSegs; seg; seg = seg->next) {
-        long pad;
         RelocRec *r;
 
         bodyLen = 0;
         for (r = seg->relocHead; r; r = r->next)
-            bodyLen += (r->type == 0) ? 11L : 16L;
-        bodyLen += seg->dataLen + 1;
+            bodyLen += (r->type == 0) ? 11L : 15L;
+        if (seg->dataLen > 0xDF)
+            bodyLen += 6L + seg->dataLen;
+        else if (seg->dataLen > 0)
+            bodyLen += 2L + seg->dataLen;
+        else
+            bodyLen += 1L;
 
         OmfWriteSegHeader(fp, seg, bodyLen, segNum++, baseName);
-        OmfWriteSuper(fp, seg);
 
         if (seg->dataLen > 0) {
             if (seg->dataLen > 0xDF) {
@@ -406,13 +401,8 @@ if (opt_express) {
                 fwrite(seg->data, 1, (size_t)seg->dataLen, fp);
                 }
             }
+        OmfWriteSuper(fp, seg);
         OmfWriteByte(fp, OP_END);
-
-        {
-        long pos = ftell(fp);
-        pad = (512L - (pos % 512L)) % 512L;
-        while (pad-- > 0) OmfWriteByte(fp, 0);
-        }
         }
     }
 
@@ -475,7 +465,15 @@ for (i = 1; i <= argc; i++) {
     char *arg = argv[i];
     if (!arg || !arg[0]) continue;
 
-    if (arg[0] == '+' || arg[0] == '-') {
+    if (arg[0] == '-' && arg[1] == 'o' && arg[2] == 0) {
+        /* -o <file>: same as keep=<file> */
+        if (i + 1 <= argc && argv[i + 1]) {
+            i++;
+            strncpy(keepName, argv[i], PATH_MAX - 1);
+            SetBaseName();
+            }
+        }
+    else if (arg[0] == '+' || arg[0] == '-') {
         ParseFlag(arg);
         }
     else if ((toupper((int)arg[0]) == 'K') &&
@@ -485,25 +483,86 @@ for (i = 1; i <= argc; i++) {
         strncpy(keepName, arg + 5, PATH_MAX - 1);
         SetBaseName();
         }
+    else if ((toupper((int)arg[0]) == 'L') &&
+             (toupper((int)arg[1]) == 'I') &&
+             (toupper((int)arg[2]) == 'B') && arg[3] == '=') {
+        /* lib=<path>: add library file for symbol extraction */
+        LibFile *lf = (LibFile *)malloc(sizeof(LibFile));
+        if (!lf) FatalError("out of memory (LibFile)");
+        memset(lf, 0, sizeof(LibFile));
+        strncpy(lf->path, arg + 4, PATH_MAX - 1);
+        lf->fp = fopen(lf->path, "rb");
+        if (!lf->fp) {
+            fprintf(stderr, "clinker: cannot open library: %s\n", lf->path);
+            free(lf);
+            numErrors++;
+            } else {
+            lf->next = libFiles;
+            libFiles = lf;
+            }
+        }
     else {
-        /* Input file */
+        /* Input file.  If no extension and bare open fails, try .a then .A.
+         * If the original arg had no extension, also try the .ROOT companion
+         * file (ORCA/M assembler emits data/privdata segments there). */
+        char tryName[PATH_MAX];
+        int  noExt = !strchr(arg, '.');
         InputFile *inf = (InputFile *)malloc(sizeof(InputFile));
         if (!inf) FatalError("out of memory (InputFile)");
         memset(inf, 0, sizeof(InputFile));
-        strncpy(inf->name, arg, PATH_MAX - 1);
-        inf->fileNum = ++fileSeq;
         inf->fp = fopen(arg, "rb");
+        if (!inf->fp && noExt) {
+            snprintf(tryName, sizeof(tryName), "%s.a", arg);
+            inf->fp = fopen(tryName, "rb");
+            if (inf->fp) arg = tryName;
+            }
+        if (!inf->fp && noExt) {
+            snprintf(tryName, sizeof(tryName), "%s.A", arg);
+            inf->fp = fopen(tryName, "rb");
+            if (inf->fp) arg = tryName;
+            }
         if (!inf->fp) {
             fprintf(stderr, "clinker: cannot open: %s\n", arg);
             free(inf);
             numErrors++;
             continue;
             }
+        strncpy(inf->name, arg, PATH_MAX - 1);
+        inf->fileNum = ++fileSeq;
         if (!inputFiles)
             inputFiles = inf;
         else
             tail->next = inf;
         tail = inf;
+        inputTail = inf;
+
+        /* If original arg had no extension, also load the .ROOT companion.
+         * The ORCA/M assembler writes data/privdata segments (which define
+         * LOCAL symbols for direct-page variables) into a separate .ROOT file.
+         * iix link includes it automatically; clinker must too. */
+        if (noExt) {
+            char rootName[PATH_MAX];
+            FILE *rfp = NULL;
+            InputFile *rootInf;
+
+            snprintf(rootName, sizeof(rootName), "%s.ROOT", argv[i]);
+            rfp = fopen(rootName, "rb");
+            if (!rfp) {
+                snprintf(rootName, sizeof(rootName), "%s.root", argv[i]);
+                rfp = fopen(rootName, "rb");
+                }
+            if (rfp) {
+                rootInf = (InputFile *)malloc(sizeof(InputFile));
+                if (!rootInf) FatalError("out of memory (RootFile)");
+                memset(rootInf, 0, sizeof(InputFile));
+                rootInf->fp      = rfp;
+                rootInf->fileNum = ++fileSeq;
+                strncpy(rootInf->name, rootName, PATH_MAX - 1);
+                tail->next = rootInf;
+                tail       = rootInf;
+                inputTail  = rootInf;
+                }
+            }
         }
     }
 return (numErrors == 0);
@@ -540,6 +599,10 @@ if (!ok && numErrors > 0) {
     fprintf(stderr, "clinker: %d error(s) in pass 1\n", numErrors);
     return 1;
     }
+
+/* Library search: pull needed segments from library files */
+if (libFiles)
+    LibrarySearch();
 
 /* Pass 2: generate output data */
 ok = Pass2();

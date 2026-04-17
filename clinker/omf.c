@@ -129,8 +129,19 @@ long  nameStart;
 if (fseek(fp, startOff, SEEK_SET) != 0)
     return 0;
 
-/* BLKCNT -- if 0 and at EOF, no more segments */
-if (!OmfReadDword(fp, &blkcnt)) return 0;
+/* First field = total byte count of this segment on disk.
+ * A zero or EOF here means no more segments -- clean end of iteration. */
+{
+int b0 = fgetc(fp);
+if (b0 == EOF) return 0;
+{
+int b1 = fgetc(fp);
+int b2 = fgetc(fp);
+int b3 = fgetc(fp);
+if (b1 == EOF || b2 == EOF || b3 == EOF) return 0;
+blkcnt = (dword)b0 | ((dword)b1 << 8) | ((dword)b2 << 16) | ((dword)b3 << 24);
+}
+}
 if (blkcnt == 0) return 0;
 
 OmfReadDword(fp, &resspc);
@@ -162,11 +173,23 @@ OmfReadDword(fp, &entry);
 OmfReadWord(fp, &dispname);
 OmfReadWord(fp, &dispbody);
 
-/* Names at offset 44 from segment start */
-nameStart = startOff + 44;
+/* Names start at DISPNAME offset from segment start.
+ * OMF v2 layout: 10-byte space-padded LOADNAME, then pstring SEGNAME. */
+nameStart = startOff + (long)dispname;
 fseek(fp, nameStart, SEEK_SET);
-OmfReadPString(fp, seg->loadName, NAME_MAX);
-OmfReadPString(fp, seg->segName,  NAME_MAX);
+
+{
+char tmp[11];
+int  last;
+fread(tmp, 1, 10, fp);
+tmp[10] = 0;
+last = 9;
+while (last >= 0 && tmp[last] == ' ') last--;
+tmp[last + 1] = 0;
+strncpy(seg->loadName, tmp, NAME_MAX - 1);
+seg->loadName[NAME_MAX - 1] = 0;
+OmfReadPString(fp, seg->segName, NAME_MAX);
+}
 
 /* Uppercase (ORCA convention) */
 {
@@ -178,8 +201,10 @@ for (p = seg->segName;  *p; p++) *p = (char)toupper(*p);
 /* Body starts at startOff + DISPDATA */
 seg->fileBodyOffset = startOff + (long)dispbody;
 
-/* Disk span = BLKCNT * 512 (used by caller to find next segment) */
-seg->bodyLen = (long)blkcnt * 512L;
+/* Disk span = first header field, which is the total byte count of the
+ * segment on disk (NOT a block count despite being called BLKCNT in
+ * many docs -- DumpOBJ labels it "Byte count" which is correct). */
+seg->bodyLen = (long)blkcnt;
 
 return 1;
 }
@@ -224,23 +249,33 @@ long OmfWriteSegHeader(FILE *fp, OutSeg *seg, long bodyLen, int segNum,
                        const char *loadName)
 {
 long bodyDisp;
-int  loadLen, segLen, padLoad, padSeg;
+int  segLen;
 long blkcnt, totalLen;
+char ldBuf[10];
+int  i, llen;
 
-loadLen = (int)strlen(loadName);
+/* Use the ORCA/M standard segment header format:
+ *   DISPNAME = $2C (44): names start at offset 44
+ *   Load name: 10 bytes, space-padded (fixed width, no length prefix)
+ *   Seg name:  pstring (1-byte length + chars), no padding
+ * Body follows immediately; DISPDATA = 44 + 10 + 1 + segLen. */
+
+/* Build 10-byte fixed load name: truncate or space-pad */
+llen = (int)strlen(loadName);
+if (llen > 10) llen = 10;
+for (i = 0; i < llen; i++)       ldBuf[i] = loadName[i];
+for (; i < 10; i++)               ldBuf[i] = ' ';
+
 segLen  = (int)strlen(seg->segName);
 
-/* Each pstring is (1 + N) bytes; pad to even */
-padLoad = (loadLen + 1) & 1;
-padSeg  = (segLen  + 1) & 1;
-
-bodyDisp = 44L + 1 + loadLen + padLoad + 1 + segLen + padSeg;
+/* DISPNAME=44, then 10-byte load name, then pstring seg name */
+bodyDisp = 44L + 10 + 1 + segLen;
 totalLen = bodyDisp + bodyLen;
-blkcnt   = (totalLen + 511L) / 512L;
+blkcnt   = totalLen;
 
 /* BLKCNT */  OmfWriteDword(fp, blkcnt);
 /* RESSPC */  OmfWriteDword(fp, 0L);
-/* LENGTH */  OmfWriteDword(fp, bodyLen);
+/* LENGTH */  OmfWriteDword(fp, (long)seg->dataLen);
 /* unused */  OmfWriteByte (fp, 0);
 /* LABLEN */  OmfWriteByte (fp, 0);
 /* NUMLEN */  OmfWriteByte (fp, 4);
@@ -254,13 +289,13 @@ blkcnt   = (totalLen + 511L) / 512L;
 /* LANG */    OmfWriteByte (fp, 0);
 /* SEGNUM */  OmfWriteWord (fp, segNum);
 /* ENTRY */   OmfWriteDword(fp, 0L);
-/* DISPNAME */ OmfWriteWord(fp, 44);
+/* DISPNAME */ OmfWriteWord(fp, 44);          /* $2C */
 /* DISPDATA */ OmfWriteWord(fp, (int)bodyDisp);
 
-/* LOADNAME */ OmfWritePString(fp, loadName);
-               if (padLoad) OmfWriteByte(fp, 0);
-/* SEGNAME */  OmfWritePString(fp, seg->segName);
-               if (padSeg)  OmfWriteByte(fp, 0);
+/* 10-byte fixed load name */
+fwrite(ldBuf, 1, 10, fp);
+/* pstring segment name */
+OmfWritePString(fp, seg->segName);
 
 return ftell(fp);
 }
@@ -280,15 +315,14 @@ if (r->type == 0) {
     OmfWriteDword(fp, r->pc);
     OmfWriteDword(fp, r->value);
     } else {
-    /* INTERSEG: op(1) pLen(1) shift(1) unused(5) pc(4) fileNum(2) segNum(2) */
+    /* INTERSEG: op(1) pLen(1) shift(1) pc(4) fileNum(2) segNum(2) addend(4) */
     OmfWriteByte (fp, OP_INTERSEG);
     OmfWriteByte (fp, r->patchLen);
     OmfWriteByte (fp, r->shift);
-    OmfWriteDword(fp, 0L);  /* unused 4 bytes */
-    OmfWriteByte (fp, 0);   /* unused 1 byte  */
     OmfWriteDword(fp, r->pc);
     OmfWriteWord (fp, r->fileNum);
     OmfWriteWord (fp, r->segNum);
+    OmfWriteDword(fp, r->value);  /* addend */
     }
 }
 

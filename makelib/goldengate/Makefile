@@ -19,7 +19,13 @@ BIN_DIR      ?= $(MAKEFILE_DIR)
 INSTALL_SH   ?= $(MAKEFILE_DIR)/../../goldengate/install.sh
 
 CC       := iix compile
-LINK     := iix link
+ifeq ($(USE_CLINKER),1)
+LINK      := iix clinker
+LINK_LIBS := lib=$(GG_ROOT)/Libraries/ORCALib lib=$(GG_ROOT)/Libraries/SysFloat lib=$(GG_ROOT)/Libraries/SysLib
+else
+LINK      := iix link
+LINK_LIBS :=
+endif
 
 # ── GoldenGate root ──────────────────────────────────────────────────────────
 OS := $(shell uname -s 2>/dev/null || echo Windows)
@@ -54,7 +60,7 @@ $(OBJ_DIR)/MakeLib.a: $(SRC_DIR)/MakeLib.cc | $(OBJ_DIR)
 # ── Link ──────────────────────────────────────────────────────────────────────
 $(BIN_OUT): $(OBJ_DIR)/MakeLib.a | $(BIN_DIR)
 	@echo "=== link MakeLib ==="
-	cd $(OBJ_DIR) && $(LINK) -o $(BIN_OUT) MakeLib
+	cd $(OBJ_DIR) && $(LINK) -o $(BIN_OUT) MakeLib $(LINK_LIBS)
 
 $(OBJ_DIR):
 	mkdir -p $(OBJ_DIR)

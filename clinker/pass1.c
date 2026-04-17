@@ -70,9 +70,20 @@ for (;;) {
         }
     else if (op == EXPR_WEAK || op == EXPR_STRONG ||
              op == 0x84 || op == 0x85 || op == 0x86) {
-        /* pstring name */
-        int nlen = fgetc(fp);
-        if (nlen != EOF) fseek(fp, nlen, SEEK_CUR);
+        /* pstring name: record as requested for library search */
+        char name[NAME_MAX];
+        int  nlen = fgetc(fp);
+        if (nlen != EOF && nlen > 0) {
+            int i, c;
+            for (i = 0; i < nlen && i < NAME_MAX - 1; i++) {
+                c = fgetc(fp);
+                if (c == EOF) break;
+                name[i] = (char)toupper(c);
+                }
+            name[i] = 0;
+            for (; i < nlen; i++) fgetc(fp);
+            SymRequest(name, 1);
+            }
         }
     }
 }
@@ -144,8 +155,7 @@ for (;;) {
         }
         sym = SymFind(name);
         if (!sym || !(sym->flags & SYM_PASS1_RESOLVED)) {
-            if (op == EXPR_STRONG)
-                LinkError("undefined symbol", name);
+            SymRequest(name, 1);  /* mark for library search */
             if (top < 32) stack[top++] = 0;
             } else {
             if (top < 32) stack[top++] = sym->value;
@@ -288,13 +298,29 @@ for (;;) {
         SkipExpression(fp);
         pc += (long)pLen;
         }
+    else if (op == OP_LEXPR) {
+        /* LEXPR ($F3): like EXPR but patch is in outer segment; same layout */
+        byte pLen = (byte)fgetc(fp);
+        SkipExpression(fp);
+        pc += (long)pLen;
+        }
+    else if (op == OP_ENTRY) {
+        /* ENTRY ($F4): word(reserved) + dword(value) + pstring(name) */
+        word  w;
+        dword v;
+        int   nlen;
+        OmfReadWord(fp, &w);
+        OmfReadDword(fp, &v);
+        nlen = fgetc(fp);
+        if (nlen != EOF) fseek(fp, nlen, SEEK_CUR);
+        }
     else if (op == OP_RELOC) {
         /* pLen(1) shift(1) pc(4) value(4) = 10 more bytes */
         fseek(fp, 10, SEEK_CUR);
         }
     else if (op == OP_INTERSEG) {
-        /* pLen(1) shift(1) unused(5) pc(4) fileNum(2) segNum(2) = 15 bytes */
-        fseek(fp, 15, SEEK_CUR);
+        /* pLen(1) shift(1) pc(4) fileNum(2) segNum(2) addend(4) = 14 bytes */
+        fseek(fp, 14, SEEK_CUR);
         }
     else if (op == OP_CRELOC) {
         /* pLen(1) shift(1) pc16(2) value16(2) = 6 bytes */
@@ -318,7 +344,9 @@ for (;;) {
         fseek(fp, 8, SEEK_CUR);
         }
     else {
-        LinkError("unknown OMF record in pass 1", seg->segName);
+        char msg[64];
+        sprintf(msg, "unknown OMF record $%02X in pass 1", op);
+        LinkError(msg, seg->segName);
         break;
         }
     }
@@ -345,8 +373,9 @@ seg->outSegNum  = out->segNum;
 seg->baseOffset = out->length;
 out->length    += measured;
 
-/* Register segment name as a symbol */
-if (seg->segName[0] && !SymFind(seg->segName))
+/* Register segment name as a symbol (always define; may already exist
+ * from SymRequest before this segment was processed) */
+if (seg->segName[0])
     SymDefine(seg->segName, seg->baseOffset, out->segNum,
               SYM_PASS1_RESOLVED | SYM_IS_SEGMENT);
 
@@ -407,3 +436,180 @@ for (inf = inputFiles; inf; inf = inf->next) {
 
 return (numErrors == 0);
 }
+
+/* ----------------------------------------------------------
+   SegDefinesNeededSym
+
+   Quick scan of a segment body: return 1 if it defines any
+   symbol that is requested but not yet resolved.
+   ---------------------------------------------------------- */
+static int SegDefinesNeededSym(FILE *fp, InSeg *seg)
+{
+int op;
+Symbol *sym;
+
+/* Check segment name itself (segment names become symbols) */
+if (seg->segName[0]) {
+    char *p;
+    char upper[NAME_MAX];
+    strncpy(upper, seg->segName, NAME_MAX - 1);
+    upper[NAME_MAX - 1] = 0;
+    for (p = upper; *p; p++) *p = (char)toupper(*p);
+    sym = SymFind(upper);
+    if (sym && (sym->flags & SYM_PASS1_REQUESTED) &&
+               !(sym->flags & SYM_PASS1_RESOLVED))
+        return 1;
+    }
+
+if (fseek(fp, seg->fileBodyOffset, SEEK_SET) != 0)
+    return 0;
+
+for (;;) {
+    op = fgetc(fp);
+    if (op == EOF) break;
+    op &= 0xFF;
+
+    if (op == OP_END) break;
+    else if (op >= 0x01 && op <= 0xDF) {
+        fseek(fp, op, SEEK_CUR);
+        }
+    else if (op == OP_DS || op == OP_LCONST || op == OP_SUPER) {
+        dword len;
+        OmfReadDword(fp, &len);
+        if (op != OP_DS) fseek(fp, (long)len, SEEK_CUR);
+        }
+    else if (op == OP_GLOBAL || op == OP_LOCAL) {
+        char name[NAME_MAX];
+        Symbol *sym;
+        OmfReadPString(fp, name, NAME_MAX);
+        {
+        char *p;
+        for (p = name; *p; p++) *p = (char)toupper(*p);
+        }
+        fseek(fp, 4, SEEK_CUR);  /* skip 4 bytes of attrs */
+        sym = SymFind(name);
+        if (sym && (sym->flags & SYM_PASS1_REQUESTED) &&
+                   !(sym->flags & SYM_PASS1_RESOLVED))
+            return 1;
+        }
+    else if (op == OP_GEQU || op == OP_EQU) {
+        char name[NAME_MAX];
+        Symbol *sym;
+        OmfReadPString(fp, name, NAME_MAX);
+        {
+        char *p;
+        for (p = name; *p; p++) *p = (char)toupper(*p);
+        }
+        fseek(fp, 4, SEEK_CUR);  /* skip attrs */
+        SkipExpression(fp);
+        sym = SymFind(name);
+        if (sym && (sym->flags & SYM_PASS1_REQUESTED) &&
+                   !(sym->flags & SYM_PASS1_RESOLVED))
+            return 1;
+        }
+    else if (op == OP_RELOC)  { fseek(fp, 10, SEEK_CUR); }
+    else if (op == OP_INTERSEG) { fseek(fp, 14, SEEK_CUR); }
+    else if (op == OP_CRELOC)   { fseek(fp, 6, SEEK_CUR); }
+    else if (op == OP_CINTERSEG){ fseek(fp, 7, SEEK_CUR); }
+    else if (op == OP_ALIGN || op == OP_ORG) { fseek(fp, 4, SEEK_CUR); }
+    else if (op == OP_EXPR || op == OP_ZEXPR || op == OP_BEXPR ||
+             op == OP_LEXPR) {
+        fgetc(fp);
+        SkipExpression(fp);
+        }
+    else if (op == OP_RELEXPR) {
+        fgetc(fp);
+        fseek(fp, 4, SEEK_CUR);
+        SkipExpression(fp);
+        }
+    else if (op == OP_ENTRY) {
+        word  w; dword v; int nlen;
+        OmfReadWord(fp, &w);
+        OmfReadDword(fp, &v);
+        nlen = fgetc(fp);
+        if (nlen != EOF) fseek(fp, nlen, SEEK_CUR);
+        }
+    else if (op == OP_STRONG || op == OP_USING || op == OP_MEM) {
+        if (op == OP_MEM) { fseek(fp, 8, SEEK_CUR); }
+        else { int nlen = fgetc(fp); if (nlen != EOF) fseek(fp, nlen, SEEK_CUR); }
+        }
+    else break;  /* unknown: stop scan */
+    }
+return 0;
+}
+
+/* ----------------------------------------------------------
+   LibrarySearch
+
+   After Pass1, repeatedly scan library files for segments
+   that define symbols needed (SYM_PASS1_REQUESTED) but not
+   yet resolved.  Pull matching segments into inputFiles and
+   run Pass1Seg on them.  Repeat until stable.
+   ---------------------------------------------------------- */
+void LibrarySearch(void)
+{
+BOOLEAN changed;
+static int libFileSeq = 0;
+
+if (!libFiles) return;
+
+do {
+    LibFile *lf;
+    changed = FALSE;
+
+    for (lf = libFiles; lf; lf = lf->next) {
+        long segOff = 0;
+
+        for (;;) {
+            InSeg     *seg;
+            InputFile *inf;
+            long       diskLen;
+
+            seg = (InSeg *)malloc(sizeof(InSeg));
+            if (!seg) FatalError("out of memory (LibSeg)");
+            memset(seg, 0, sizeof(InSeg));
+
+            if (!OmfReadHeader(lf->fp, seg, segOff)) {
+                free(seg);
+                break;
+                }
+
+            diskLen = seg->bodyLen;
+            if (diskLen == 0) {
+                free(seg);
+                break;
+                }
+
+            if (SegDefinesNeededSym(lf->fp, seg)) {
+                /* Pull this segment: wrap in a minimal InputFile */
+                inf = (InputFile *)malloc(sizeof(InputFile));
+                if (!inf) FatalError("out of memory (LibInputFile)");
+                memset(inf, 0, sizeof(InputFile));
+                inf->fp      = lf->fp;
+                inf->isLib   = TRUE;
+                inf->fileNum = ++libFileSeq;
+                strncpy(inf->name, lf->path, PATH_MAX - 1);
+                inf->segs    = seg;
+
+                /* Append to inputFiles */
+                if (!inputFiles)
+                    inputFiles = inf;
+                else
+                    inputTail->next = inf;
+                inputTail = inf;
+
+                Pass1Seg(inf, seg);
+                changed = TRUE;
+                } else {
+                free(seg);
+                }
+
+            segOff += diskLen;
+            }
+
+        /* Reset library file position for next iteration */
+        fseek(lf->fp, 0, SEEK_SET);
+        }
+    } while (changed);
+}
+

@@ -175,17 +175,17 @@ for (;;) {
                     pLen, shift, (long)value, 0, 0, 0);
         }
     else if (op == OP_INTERSEG) {
-        /* INTERSEG: pLen(1) shift(1) unused(5) pc(4) fileNum(2) segNum(2) */
+        /* INTERSEG: pLen(1) shift(1) pc(4) fileNum(2) segNum(2) addend(4) */
         byte pLen  = (byte)OmfReadByte(inf->fp);
         byte shift = (byte)OmfReadByte(inf->fp);
-        dword rpc;
+        dword rpc, addend;
         word  iFileNum, iSegNum;
-        fseek(inf->fp, 5, SEEK_CUR);  /* skip 5 unused bytes */
         OmfReadDword(inf->fp, &rpc);
         OmfReadWord(inf->fp, &iFileNum);
         OmfReadWord(inf->fp, &iSegNum);
+        OmfReadDword(inf->fp, &addend);
         AppendReloc(out, (long)rpc + seg->baseOffset,
-                    pLen, shift, 0L, 1, (int)iSegNum, (int)iFileNum);
+                    pLen, shift, (long)addend, 1, (int)iSegNum, (int)iFileNum);
         }
     else if (op == OP_CRELOC) {
         /* cRELOC: pLen(1) shift(1) pc16(2) value16(2) */
@@ -218,8 +218,12 @@ for (;;) {
         for (i = 0; i < pLen && i < 4; i++)
             buf[i] = (byte)(result >> (i * 8));
         EmitData(out, buf, (long)pLen);
-        if (needsReloc)
-            AppendReloc(out, pc, pLen, 0, 0L, 0, 0, 0);
+        if (needsReloc) {
+            if (segOut != 0 && segOut != out->segNum)
+                AppendReloc(out, pc, pLen, 0, 0L, 1, segOut, 1);
+            else
+                AppendReloc(out, pc, pLen, 0, 0L, 0, 0, 0);
+            }
         pc += pLen;
         }
     else if (op == OP_RELEXPR) {
@@ -257,6 +261,33 @@ for (;;) {
         fgetc(inf->fp);
         EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc);
         }
+    else if (op == OP_LEXPR) {
+        /* LEXPR ($F3): patch in outer segment; same layout as EXPR */
+        byte pLen = (byte)OmfReadByte(inf->fp);
+        byte buf[4] = {0, 0, 0, 0};
+        int  i;
+        EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc);
+        for (i = 0; i < pLen && i < 4; i++)
+            buf[i] = (byte)(result >> (i * 8));
+        EmitData(out, buf, (long)pLen);
+        if (needsReloc) {
+            if (segOut != 0 && segOut != out->segNum)
+                AppendReloc(out, pc, pLen, 0, 0L, 1, segOut, 1);
+            else
+                AppendReloc(out, pc, pLen, 0, 0L, 0, 0, 0);
+            }
+        pc += pLen;
+        }
+    else if (op == OP_ENTRY) {
+        /* ENTRY ($F4): word(reserved) + dword(value) + pstring(name) — skip */
+        word  w;
+        dword v;
+        int   nlen;
+        OmfReadWord(inf->fp, &w);
+        OmfReadDword(inf->fp, &v);
+        nlen = fgetc(inf->fp);
+        if (nlen != EOF) fseek(inf->fp, nlen, SEEK_CUR);
+        }
     else if (op == OP_SUPER) {
         /* SUPER records in input: translate to RELOC/INTERSEG.       *
          * Currently we skip -- proper SUPER parsing is a future item. */
@@ -272,7 +303,9 @@ for (;;) {
         fseek(inf->fp, 8, SEEK_CUR);  /* two 4-byte numbers */
         }
     else {
-        LinkError("unknown OMF record in pass 2", seg->segName);
+        char msg[64];
+        sprintf(msg, "unknown OMF record $%02X in pass 2", op);
+        LinkError(msg, seg->segName);
         break;
         }
     }

@@ -22,6 +22,13 @@ INSTALL_SH   ?= $(MAKEFILE_DIR)/../../goldengate/install.sh
 
 IIX      := iix
 CHTYP    := iix chtyp
+ifeq ($(USE_CLINKER),1)
+LINK      := iix clinker
+LINK_LIBS := lib=$(GG_ROOT)/Libraries/PasLib lib=$(GG_ROOT)/Libraries/SysLib lib=$(GG_ROOT)/Libraries/ORCALib
+else
+LINK      := iix link
+LINK_LIBS :=
+endif
 PASFLAGS := +T -P
 
 # ── GoldenGate root ──────────────────────────────────────────────────────────
@@ -86,9 +93,10 @@ setup:
 # ── Link ──────────────────────────────────────────────────────────────────────
 $(BIN_OUT): $(OBJS) | $(BIN_DIR)
 	@echo "=== link pascal ==="
-	cd $(SRC_DIR) && $(IIX) link \
+	cd $(SRC_DIR) && $(LINK) \
 		obj/pascal obj/call obj/parser obj/native obj/cgi obj/symbols \
 		obj/scanner obj/dag obj/cgc obj/gen obj/objout obj/pcommon \
+		$(LINK_LIBS) \
 		keep=$(BIN_OUT)
 	iix chtyp -t exe -a 0xDB01 $(BIN_OUT)
 

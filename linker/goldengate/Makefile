@@ -18,7 +18,11 @@ BIN_DIR      ?= $(MAKEFILE_DIR)
 INSTALL_SH   ?= $(MAKEFILE_DIR)/../../goldengate/install.sh
 
 AS       := iix assemble
+ifeq ($(USE_CLINKER),1)
+LINK     := iix clinker
+else
 LINK     := iix link
+endif
 CHTYP    := iix chtyp
 ASFLAGS  := +T
 
@@ -55,10 +59,17 @@ setup:
 	@$(CHTYP) -t src -a 3 $(SRC_DIR)/directpage
 
 # ── Link ──────────────────────────────────────────────────────────────────────
+ifeq ($(USE_CLINKER),1)
+LINK_LIBS := lib=$(GG_ROOT)/Libraries/SysLib lib=$(GG_ROOT)/Libraries/SysFloat lib=$(GG_ROOT)/Libraries/ORCALib
+else
+LINK_LIBS :=
+endif
+
 $(BIN_OUT): $(ASM_OBJS) | $(BIN_DIR)
 	@echo "=== link linker ==="
 	cd $(SRC_DIR) && $(LINK) \
 		$(foreach m,$(ASM_MODULES),obj/$(m)) \
+		$(LINK_LIBS) \
 		keep=$(BIN_OUT)
 	iix chtyp -t exe -a 0xDB01 $(BIN_OUT)
 

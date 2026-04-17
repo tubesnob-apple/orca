@@ -13,7 +13,13 @@ BIN_DIR      ?= $(MAKEFILE_DIR)
 INSTALL_SH   ?= $(MAKEFILE_DIR)/../../goldengate/install.sh
 
 CC       := iix compile
-LINK     := iix link
+ifeq ($(USE_CLINKER),1)
+LINK      := iix clinker
+LINK_LIBS := lib=$(GG_ROOT)/Libraries/ORCALib lib=$(GG_ROOT)/Libraries/SysFloat lib=$(GG_ROOT)/Libraries/SysLib
+else
+LINK      := iix link
+LINK_LIBS :=
+endif
 
 # -- GoldenGate root ----------------------------------------------------------
 OS := $(shell uname -s 2>/dev/null || echo Windows)
@@ -62,6 +68,7 @@ $(BIN_OUT): $(C_OBJS) | $(BIN_DIR)
 	@echo "=== link clinker ==="
 	cd $(OBJ_DIR) && $(LINK) \
 		$(foreach m,$(C_MODULES),$(m)) \
+		$(LINK_LIBS) \
 		keep=$(BIN_OUT)
 	iix chtyp -t exe -a 0xDB01 $(BIN_OUT)
 

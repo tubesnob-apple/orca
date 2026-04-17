@@ -61,6 +61,8 @@ typedef unsigned long  dword;
 #define OP_EQU        0xF0
 #define OP_DS         0xF1
 #define OP_LCONST     0xF2
+#define OP_LEXPR      0xF3
+#define OP_ENTRY      0xF4
 #define OP_CRELOC     0xF5
 #define OP_CINTERSEG  0xF6
 #define OP_SUPER      0xF7
@@ -89,7 +91,7 @@ typedef unsigned long  dword;
 #define SEGTYPE_CODE    0x00
 #define SEGTYPE_DATA    0x01
 #define SEGTYPE_JUMP    0x12   /* jump table */
-#define SEGTYPE_EXPRESS 0x8012 /* express-load dynamic segment */
+#define SEGTYPE_EXPRESS 0x8001 /* express-load dynamic segment */
 
 /* Full type word flags */
 #define SEGKIND_PRIVATE 0x4000
@@ -209,9 +211,18 @@ extern BOOLEAN opt_gsplus;     /* gsplusSymbols shell var set */
 extern char    keepName[PATH_MAX];  /* keep= file name */
 extern char    baseName[PATH_MAX];  /* basename of keepName */
 
+/* Library file (for deferred symbol extraction) */
+typedef struct LibFile {
+    FILE           *fp;
+    char            path[PATH_MAX];
+    struct LibFile *next;
+} LibFile;
+
 /* Global state */
 extern int       numErrors;
 extern InputFile *inputFiles;   /* linked list of input files */
+extern InputFile *inputTail;    /* last entry in inputFiles */
+extern LibFile   *libFiles;     /* library files for symbol extraction */
 extern OutSeg    *outSegs;      /* linked list of output segments */
 extern int        numOutSegs;
 extern Symbol    *symHash[SYM_HASH_SIZE];
@@ -249,6 +260,7 @@ void    OmfWriteSuper(FILE *fp, OutSeg *seg);
 int  Pass1(void);
 int  Pass1Seg(InputFile *inf, InSeg *seg);
 long MeasureBody(FILE *fp, InSeg *seg);
+void LibrarySearch(void);
 
 /* pass2.c */
 int  Pass2(void);

@@ -419,36 +419,69 @@ else {
 }
 
 /* ----------------------------------------------------------
-   SUPER RELOC2 / RELOC3 packing
+   SUPER packing (all 38 subtypes)
 
-   Entries that qualify (type=0, shift=0, patchLen in {2,3}) are
-   grouped into one SUPER record per patchLen.  Everything else
-   falls through to individual cRELOC/RELOC/cINTERSEG/INTERSEG.
+   Each RelocRec is classified into one of 38 SUPER subtypes or marked
+   as unpackable (-1).  Records that share a subtype are collected,
+   their patch offsets are sorted and walked through 256-byte pages,
+   and the packed stream is emitted as a single SUPER record.
 
-   Packing follows Appendix F pp. 463-464: a stream of subrecords,
-   each a Count byte with (count & $80 == 0 -> Count+1 in-page
-   offsets follow) or (count & $80 -> skip (count & $7F) pages).
+   The classification table (from GS/OS Reference Appendix F p.463):
+       0         RELOC2          type=0, patchLen=2, shift=0
+       1         RELOC3          type=0, patchLen=3, shift=0
+       2         INTERSEG1       type=1, patchLen=3, shift=0,  file=1
+       3..13     INTERSEG2..12   type=1, patchLen=3, shift=0,  file=2..12
+       14..25    INTERSEG13..24  type=1, patchLen=2, shift=0,    file=1, seg=1..12
+       26..37    INTERSEG25..36  type=1, patchLen=2, shift=0xF0, file=1, seg=1..12
 
-   Because SUPER reads the reference value from the LCONST at each
-   patch location, OmfSuperPrepare must be called before the LCONST
-   is written so the right bytes are present.
+   For RELOC2/3 and INTERSEG13..36 the full patch value lives in the
+   LCONST at the patch offset.  For INTERSEG1..12 (3-byte patches), the
+   16-bit offset lives in bytes 0-1 and the target segment number in
+   byte 2.  OmfPrepareSuper writes those bytes before the LCONST is
+   emitted so the loader can read them back at run time.
 
-   INTERSEG SUPER subtypes (2..37) are not yet packed here; those
-   still go out as individual cINTERSEG/INTERSEG records.
+   Unpackable records (non-matching shape, large fileNum for INTERSEG,
+   anything with shift values other than 0 or 0xF0) fall through to
+   individual cRELOC/RELOC/cINTERSEG/INTERSEG emission.
+
+   Packing per Appendix F pp. 463-464: a stream of subrecords, each
+   a Count byte with (Count & $80 == 0 -> Count+1 in-page offsets
+   follow) or (Count & $80 -> skip (Count & $7F) pages).
    ---------------------------------------------------------- */
 
-static BOOLEAN SuperReloc23Type(const RelocRec *r, byte *outType)
+#define SUPER_SUBTYPE_COUNT 38
+
+/* ClassifyRelocForSuper — best SUPER subtype for r, or -1 if unpackable. */
+static int ClassifyRelocForSuper(const RelocRec *r)
 {
-if (r->type != 0 || r->shift != 0 || r->pc < 0) return FALSE;
-if (r->patchLen == 2) { if (outType) *outType = 0x00; return TRUE; }
-if (r->patchLen == 3) { if (outType) *outType = 0x01; return TRUE; }
-return FALSE;
+if (r->pc < 0) return -1;
+
+if (r->type == 0) {
+    if (r->shift == 0 && r->patchLen == 2) return 0;    /* RELOC2 */
+    if (r->shift == 0 && r->patchLen == 3) return 1;    /* RELOC3 */
+    return -1;
+    }
+
+/* r->type == 1 (INTERSEG) */
+
+if (r->patchLen == 3 && r->shift == 0 &&
+    r->fileNum >= 1 && r->fileNum <= 12) {
+    return r->fileNum + 1;                              /* INTERSEG1..12  */
+    }
+
+if (r->patchLen == 2 && r->fileNum == 1 &&
+    r->segNum >= 1 && r->segNum <= 12) {
+    if (r->shift == 0)    return r->segNum + 13;        /* INTERSEG13..24 */
+    if (r->shift == 0xF0) return r->segNum + 25;        /* INTERSEG25..36 */
+    }
+
+return -1;
 }
 
-/* Collect, in ascending-pc order, every RelocRec in `seg` that packs
- * into SUPER subtype `superType`.  Returns offset array (caller frees)
- * and count via *outCount.  Caller receives NULL/0 when none match. */
-static long *CollectSuperOffsets(const OutSeg *seg, byte superType,
+/* Collect, in ascending-pc order, every RelocRec in `seg` whose
+ * classification matches `subtype`.  Returns offset array (caller
+ * frees) and count via *outCount.  Returns NULL/0 when none match. */
+static long *CollectSuperOffsets(const OutSeg *seg, int subtype,
                                  int *outCount)
 {
 long     *arr;
@@ -456,22 +489,18 @@ int       count = 0;
 int       i;
 RelocRec *r;
 
-for (r = seg->relocHead; r; r = r->next) {
-    byte t;
-    if (SuperReloc23Type(r, &t) && t == superType) count++;
-    }
+for (r = seg->relocHead; r; r = r->next)
+    if (ClassifyRelocForSuper(r) == subtype) count++;
 
 *outCount = count;
 if (count == 0) return NULL;
 
 arr = (long *)malloc((size_t)count * sizeof(long));
-if (!arr) return NULL;  /* caller treats as empty */
+if (!arr) return NULL;
 
 i = 0;
-for (r = seg->relocHead; r; r = r->next) {
-    byte t;
-    if (SuperReloc23Type(r, &t) && t == superType) arr[i++] = r->pc;
-    }
+for (r = seg->relocHead; r; r = r->next)
+    if (ClassifyRelocForSuper(r) == subtype) arr[i++] = r->pc;
 
 /* Insertion sort (reloc counts per segment are small). */
 for (i = 1; i < count; i++) {
@@ -515,7 +544,7 @@ while (i < n) {
 return bytes;
 }
 
-static void EmitSuperStream(FILE *fp, byte superType,
+static void EmitSuperStream(FILE *fp, int subtype,
                             const long *offs, int n)
 {
 long streamBytes = PackedSuperBytes(offs, n);
@@ -524,7 +553,7 @@ int  page = 0;
 
 OmfWriteByte (fp, OP_SUPER);
 OmfWriteDword(fp, 1L + streamBytes);   /* length = type byte + stream */
-OmfWriteByte (fp, (int)superType);
+OmfWriteByte (fp, subtype);
 
 while (i < n) {
     int targetPage = (int)(offs[i] >> 8);
@@ -547,24 +576,27 @@ while (i < n) {
     }
 }
 
-/* Total bytes the SUPER emission will write for this segment (SUPER
- * records for RELOC2/RELOC3 + individual records for everything else). */
+/* Total bytes the SUPER emission will write for this segment (one
+ * SUPER record per populated subtype + an individual record for each
+ * unpackable reloc). */
 long OmfSuperBytes(const OutSeg *seg)
 {
 long       bytes = 0;
+int        subtype;
 int        n;
 long      *arr;
 RelocRec  *r;
-byte       t;
 
-arr = CollectSuperOffsets(seg, 0x00, &n);
-if (n > 0) { bytes += 1 + 4 + 1 + PackedSuperBytes(arr, n); free(arr); }
-
-arr = CollectSuperOffsets(seg, 0x01, &n);
-if (n > 0) { bytes += 1 + 4 + 1 + PackedSuperBytes(arr, n); free(arr); }
+for (subtype = 0; subtype < SUPER_SUBTYPE_COUNT; subtype++) {
+    arr = CollectSuperOffsets(seg, subtype, &n);
+    if (n > 0) {
+        bytes += 1L + 4L + 1L + PackedSuperBytes(arr, n);
+        free(arr);
+        }
+    }
 
 for (r = seg->relocHead; r; r = r->next) {
-    if (SuperReloc23Type(r, &t)) continue;  /* packed */
+    if (ClassifyRelocForSuper(r) >= 0) continue;   /* packed */
     bytes += OmfRelocSize(r);
     }
 
@@ -572,40 +604,53 @@ return bytes;
 }
 
 /* Populate seg->data at each SUPER-packable patch location with the
- * reference value from the matching RelocRec.  Call before writing the
- * LCONST so that SUPER's "value lives in LCONST" contract holds at
- * load time. */
+ * reference value (and, for INTERSEG1..12, the target segment number)
+ * that the SUPER record will later point at.  Call before writing the
+ * LCONST so the loader can read back the values at run time. */
 void OmfPrepareSuper(OutSeg *seg)
 {
 RelocRec *r;
-int       i;
-byte      t;
+int       i, subtype;
 
 for (r = seg->relocHead; r; r = r->next) {
-    if (!SuperReloc23Type(r, &t)) continue;
-    if (r->pc + r->patchLen > seg->dataLen) continue;
-    for (i = 0; i < r->patchLen; i++)
-        seg->data[r->pc + i] = (byte)(r->value >> (i * 8));
+    subtype = ClassifyRelocForSuper(r);
+    if (subtype < 0) continue;
+    if (r->pc < 0 || r->pc + r->patchLen > seg->dataLen) continue;
+
+    if (subtype >= 2 && subtype <= 13) {
+        /* INTERSEG1..12 (3-byte): 16-bit offset in bytes 0-1,
+         * target segment number in byte 2. */
+        seg->data[r->pc + 0] = (byte)(r->value);
+        seg->data[r->pc + 1] = (byte)(r->value >> 8);
+        seg->data[r->pc + 2] = (byte)(r->segNum);
+        }
+    else {
+        /* RELOC2 (2b), RELOC3 (3b), INTERSEG13..36 (2b): pure value. */
+        for (i = 0; i < r->patchLen; i++)
+            seg->data[r->pc + i] = (byte)(r->value >> (i * 8));
+        }
     }
 }
 
 void OmfWriteSuper(FILE *fp, OutSeg *seg)
 {
-long      *arr;
+int        subtype;
 int        n;
+long      *arr;
 RelocRec  *r;
-byte       t;
 
-arr = CollectSuperOffsets(seg, 0x00, &n);
-if (n > 0) { EmitSuperStream(fp, 0x00, arr, n); free(arr); }
-
-arr = CollectSuperOffsets(seg, 0x01, &n);
-if (n > 0) { EmitSuperStream(fp, 0x01, arr, n); free(arr); }
-
-/* Everything that didn't pack — INTERSEG, shift != 0, out-of-range
- * pc/value for RELOC2/3 — gets emitted individually. */
-for (r = seg->relocHead; r; r = r->next) {
-    if (SuperReloc23Type(r, &t)) continue;
-    OmfWriteReloc(fp, r);
+for (subtype = 0; subtype < SUPER_SUBTYPE_COUNT; subtype++) {
+    arr = CollectSuperOffsets(seg, subtype, &n);
+    if (n > 0) {
+        EmitSuperStream(fp, subtype, arr, n);
+        free(arr);
+        }
     }
+
+/* Anything ClassifyRelocForSuper couldn't pack — non-matching shape,
+ * large fileNum, unusual shift — gets emitted individually as
+ * cRELOC / RELOC / cINTERSEG / INTERSEG. */
+for (r = seg->relocHead; r; r = r->next)
+    if (ClassifyRelocForSuper(r) < 0)
+        OmfWriteReloc(fp, r);
 }

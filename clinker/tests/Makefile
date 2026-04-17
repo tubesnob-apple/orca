@@ -43,8 +43,8 @@ OUT := $(MAKEFILE_DIR)out
 #               where iix link packs into SUPER).  Run and reported, but do
 #               not fail `make all`.  Each should migrate to MUST_PASS as the
 #               corresponding roadmap phase lands.
-TESTS       := minimal reloc
-MUST_PASS   := minimal reloc
+TESTS       := minimal reloc interseg
+MUST_PASS   := minimal reloc interseg
 DIVERGE     :=
 
 .PHONY: all clean help $(TESTS:%=test-%) $(DIVERGE:%=diverge-%)
@@ -173,3 +173,33 @@ test-reloc: $(OUT)/reloc.iix $(OUT)/reloc.clinker
 # SUPER emission on our output side.
 diverge-reloc: $(OUT)/reloc.iix $(OUT)/reloc.clinker
 	$(call compare_soft,reloc)
+
+# ─── interseg: two-segment source forces an INTERSEG reference ──────────────
+#
+# `jsl helper` where helper lives in a different load segment produces a
+# 3-byte inter-segment patch.  Exercises the SUPER INTERSEG1 packing path
+# (shift=0, file=1, 3-byte) in addition to the RELOC paths.
+
+INTERSEG_OBJ := $(OBJ)/interseg
+INTERSEG_SRC := $(MAKEFILE_DIR)cases/interseg/inputs/interseg.asm
+
+$(INTERSEG_OBJ)/interseg.ROOT: $(INTERSEG_SRC)
+	@mkdir -p $(INTERSEG_OBJ)
+	@cp $(INTERSEG_SRC) $(INTERSEG_OBJ)/interseg.asm
+	@iix chtyp -l asm $(INTERSEG_OBJ)/interseg.asm
+	cd $(INTERSEG_OBJ) && iix compile interseg.asm keep=interseg >/dev/null
+	@iix chtyp -t obj $(INTERSEG_OBJ)/interseg.ROOT
+	@iix chtyp -t obj $(INTERSEG_OBJ)/interseg.A 2>/dev/null || true
+
+$(OUT)/interseg.iix: $(INTERSEG_OBJ)/interseg.ROOT
+	@mkdir -p $(OUT)
+	@echo "--- iix link interseg ---"
+	cd $(INTERSEG_OBJ) && iix link -X interseg keep=$(OUT)/interseg.iix
+
+$(OUT)/interseg.clinker: $(INTERSEG_OBJ)/interseg.ROOT
+	@mkdir -p $(OUT)
+	@echo "--- clinker interseg ---"
+	cd $(INTERSEG_OBJ) && iix $(CLINKER) -X interseg keep=$(OUT)/interseg.clinker
+
+test-interseg: $(OUT)/interseg.iix $(OUT)/interseg.clinker
+	$(call compare,interseg)

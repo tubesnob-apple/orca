@@ -289,7 +289,11 @@ for (;;) {
                     pLen, shift, (long)(word)value, 0, 0, 0);
         }
     else if (op == OP_CINTERSEG) {
-        /* cINTERSEG: pLen(1) shift(1) pc16(2) segNum(1) value16(2) */
+        /* cINTERSEG: pLen(1) shift(1) pc16(2) segNum(1) value16(2).
+         * fileNum is implicitly 1 per the spec (cINTERSEG omits the
+         * file-number word to save space), so we record 1 here; this
+         * lets the record qualify for cINTERSEG/SUPER INTERSEG13..36
+         * re-emission later. */
         byte pLen  = (byte)OmfReadByte(inf->fp);
         byte shift = (byte)OmfReadByte(inf->fp);
         word rpc;
@@ -299,7 +303,7 @@ for (;;) {
         iSegNum = (byte)OmfReadByte(inf->fp);
         OmfReadWord(inf->fp, &value);
         AppendReloc(out, (long)(word)rpc + seg->baseOffset,
-                    pLen, shift, (long)(word)value, 1, (int)iSegNum, 0);
+                    pLen, shift, (long)(word)value, 1, (int)iSegNum, 1);
         }
     else if (op == OP_EXPR || op == OP_ZEXPR || op == OP_BEXPR) {
         /* Evaluate the expression and emit pLen bytes into the LCONST

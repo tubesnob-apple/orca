@@ -297,7 +297,7 @@ Test harness under `clinker/tests/` with `make all` running all cases.
 | 3     | Foreign-file rejection in `OmfReadHeader`       | **done** |
 | 4     | `.sym65` platform-symbol sidecar                | **done** |
 | 5     | Full 16-bit KIND preservation on output         | **done** |
-| 6     | ExpressLoad emission                            | deferred |
+| 6     | ExpressLoad emission                            | **done** |
 | 7     | Library-dictionary reader                       | **done** |
 | 8     | cRELOC / cINTERSEG output                       | **done** |
 | 9     | SUPER RELOC2/RELOC3 packing on output           | **done** |
@@ -318,17 +318,6 @@ Adjacent correctness fixes that landed along the way:
 - `OP_CINTERSEG` input now records `fileNum=1` instead of 0 (cINTERSEG
   is implicitly file=1 per the spec; needed so re-emission as SUPER
   INTERSEG13..36 qualifies).
-
-## Deferred: Phase 6 — ExpressLoad emission
-
-Not a correctness gap.  GS/OS v5.0+ loads files fine without an
-ExpressLoad stub; it's a speed optimisation only.  Implementing it
-requires a two-pass file write (seg-offset tables depend on the stub's
-own size) plus the header-info array from Loader Secrets, plus a
-symbol-segment-number remap so our `.symbols`/`.sym65` sidecars stay
-consistent with the post-remap segment numbering.  Revisit if load
-speed becomes a visible concern or if we need byte-parity with iix
-link's default output (which does include ExpressLoad unless `-X`).
 
 ## Known gap
 

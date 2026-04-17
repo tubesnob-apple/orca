@@ -6,11 +6,11 @@
 #   make clean        -- remove objects and linked binary
 
 MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
-REPO_ROOT    := $(abspath $(MAKEFILE_DIR)/..)
-SRC_DIR      := $(REPO_ROOT)
-OBJ_DIR      := $(REPO_ROOT)/obj
+REPO_ROOT    := $(abspath $(MAKEFILE_DIR)/../..)
+SRC_DIR      := $(abspath $(MAKEFILE_DIR)/..)
+OBJ_DIR      := $(SRC_DIR)/obj
 BIN_DIR      ?= $(MAKEFILE_DIR)
-INSTALL_SH   ?= $(MAKEFILE_DIR)/../../../goldengate/install.sh
+INSTALL_SH   ?= $(MAKEFILE_DIR)/../../goldengate/install.sh
 
 CC       := iix compile
 LINK     := iix link

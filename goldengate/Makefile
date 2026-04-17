@@ -195,13 +195,13 @@ linker-clean:
 # ── clinker ───────────────────────────────────────────────────────────────────
 
 clinker:
-	$(GMAKE) -C $(REPO_ROOT)/linker/clinker/goldengate $(SUBMAKE_ARGS)
+	$(GMAKE) -C $(REPO_ROOT)/clinker/goldengate $(SUBMAKE_ARGS)
 
 clinker-install:
-	$(GMAKE) -C $(REPO_ROOT)/linker/clinker/goldengate $(SUBMAKE_ARGS) install
+	$(GMAKE) -C $(REPO_ROOT)/clinker/goldengate $(SUBMAKE_ARGS) install
 
 clinker-clean:
-	$(GMAKE) -C $(REPO_ROOT)/linker/clinker/goldengate $(SUBMAKE_ARGS) clean
+	$(GMAKE) -C $(REPO_ROOT)/clinker/goldengate $(SUBMAKE_ARGS) clean
 
 # ── dumpobj ───────────────────────────────────────────────────────────────────
 

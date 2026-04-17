@@ -340,28 +340,23 @@ if (opt_express) {
     for (seg = outSegs; seg; seg = seg->next) {
         RelocRec *r;
 
-        /* Compute body length: reloc records + data frame + END */
+        /* Compute body length: reloc records + LCONST frame + END.
+         * Load files must use LCONST, never the short CONST opcode
+         * ($01-$DF), which Appendix F restricts to object segments. */
         bodyLen = 0;
         for (r = seg->relocHead; r; r = r->next)
             bodyLen += (r->type == 0) ? 11L : 15L;
-        if (seg->dataLen > 0xDF)
-            bodyLen += 6L + seg->dataLen;  /* LCONST(1)+len(4)+data+END */
-        else if (seg->dataLen > 0)
-            bodyLen += 2L + seg->dataLen;  /* opcode(1)+data+END */
+        if (seg->dataLen > 0)
+            bodyLen += 6L + seg->dataLen;  /* LCONST(1)+len(4)+data+END(1) */
         else
             bodyLen += 1L;                 /* END only */
 
-        OmfWriteSegHeader(fp, seg, bodyLen, ++segNum, baseName);
+        OmfWriteSegHeader(fp, seg, bodyLen, ++segNum, seg->loadName);
 
         if (seg->dataLen > 0) {
-            if (seg->dataLen > 0xDF) {
-                OmfWriteByte (fp, OP_LCONST);
-                OmfWriteDword(fp, seg->dataLen);
-                fwrite(seg->data, 1, (size_t)seg->dataLen, fp);
-                } else {
-                OmfWriteByte(fp, (int)seg->dataLen);
-                fwrite(seg->data, 1, (size_t)seg->dataLen, fp);
-                }
+            OmfWriteByte (fp, OP_LCONST);
+            OmfWriteDword(fp, seg->dataLen);
+            fwrite(seg->data, 1, (size_t)seg->dataLen, fp);
             }
         OmfWriteSuper(fp, seg);
         OmfWriteByte(fp, OP_END);
@@ -382,24 +377,17 @@ if (opt_express) {
         bodyLen = 0;
         for (r = seg->relocHead; r; r = r->next)
             bodyLen += (r->type == 0) ? 11L : 15L;
-        if (seg->dataLen > 0xDF)
-            bodyLen += 6L + seg->dataLen;
-        else if (seg->dataLen > 0)
-            bodyLen += 2L + seg->dataLen;
+        if (seg->dataLen > 0)
+            bodyLen += 6L + seg->dataLen;  /* LCONST(1)+len(4)+data+END(1) */
         else
-            bodyLen += 1L;
+            bodyLen += 1L;                 /* END only */
 
-        OmfWriteSegHeader(fp, seg, bodyLen, segNum++, baseName);
+        OmfWriteSegHeader(fp, seg, bodyLen, segNum++, seg->loadName);
 
         if (seg->dataLen > 0) {
-            if (seg->dataLen > 0xDF) {
-                OmfWriteByte (fp, OP_LCONST);
-                OmfWriteDword(fp, seg->dataLen);
-                fwrite(seg->data, 1, (size_t)seg->dataLen, fp);
-                } else {
-                OmfWriteByte(fp, (int)seg->dataLen);
-                fwrite(seg->data, 1, (size_t)seg->dataLen, fp);
-                }
+            OmfWriteByte (fp, OP_LCONST);
+            OmfWriteDword(fp, seg->dataLen);
+            fwrite(seg->data, 1, (size_t)seg->dataLen, fp);
             }
         OmfWriteSuper(fp, seg);
         OmfWriteByte(fp, OP_END);

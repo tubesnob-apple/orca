@@ -249,31 +249,27 @@ long OmfWriteSegHeader(FILE *fp, OutSeg *seg, long bodyLen, int segNum,
                        const char *loadName)
 {
 long bodyDisp;
-int  segLen;
 long blkcnt, totalLen;
 char ldBuf[10];
 int  i, llen;
 
-/* Use the ORCA/M standard segment header format:
- *   DISPNAME = $2C (44): names start at offset 44
- *   Load name: 10 bytes, space-padded (fixed width, no length prefix)
- *   Seg name:  pstring (1-byte length + chars), no padding
- * Body follows immediately; DISPDATA = 44 + 10 + 1 + segLen. */
+/* OMF v2.1 segment header layout:
+ *   DISPNAME = $30 (48): fixed header + 4-byte tempORG, then names
+ *   LOADNAME: 10 bytes, space-padded, no length prefix
+ *   SEGNAME:  pstring, length 10, content = space-padded LOADNAME
+ *   Body follows immediately; DISPDATA = 48 + 10 + 1 + 10 = 69. */
 
-/* Build 10-byte fixed load name: truncate or space-pad */
+/* Build 10-byte space-padded load name. loadName may be "" (all spaces). */
 llen = (int)strlen(loadName);
 if (llen > 10) llen = 10;
-for (i = 0; i < llen; i++)       ldBuf[i] = loadName[i];
-for (; i < 10; i++)               ldBuf[i] = ' ';
+for (i = 0; i < llen; i++) ldBuf[i] = loadName[i];
+for (; i < 10; i++)        ldBuf[i] = ' ';
 
-segLen  = (int)strlen(seg->segName);
-
-/* DISPNAME=44, then 10-byte load name, then pstring seg name */
-bodyDisp = 44L + 10 + 1 + segLen;
+bodyDisp = 48L + 10 + 1 + 10;    /* = 69 */
 totalLen = bodyDisp + bodyLen;
 blkcnt   = totalLen;
 
-/* BLKCNT */  OmfWriteDword(fp, blkcnt);
+/* BYTECNT */ OmfWriteDword(fp, blkcnt);
 /* RESSPC */  OmfWriteDword(fp, 0L);
 /* LENGTH */  OmfWriteDword(fp, (long)seg->dataLen);
 /* unused */  OmfWriteByte (fp, 0);
@@ -289,13 +285,15 @@ blkcnt   = totalLen;
 /* LANG */    OmfWriteByte (fp, 0);
 /* SEGNUM */  OmfWriteWord (fp, segNum);
 /* ENTRY */   OmfWriteDword(fp, 0L);
-/* DISPNAME */ OmfWriteWord(fp, 44);          /* $2C */
+/* DISPNAME */ OmfWriteWord(fp, 48);          /* $30 (v2.1, after tempORG) */
 /* DISPDATA */ OmfWriteWord(fp, (int)bodyDisp);
+/* tempORG */ OmfWriteDword(fp, 0L);          /* v2.1 extension, unused */
 
-/* 10-byte fixed load name */
+/* LOADNAME: 10 bytes space-padded */
 fwrite(ldBuf, 1, 10, fp);
-/* pstring segment name */
-OmfWritePString(fp, seg->segName);
+/* SEGNAME: pstring with length 10, content = ldBuf (matches LOADNAME) */
+OmfWriteByte(fp, 10);
+fwrite(ldBuf, 1, 10, fp);
 
 return ftell(fp);
 }

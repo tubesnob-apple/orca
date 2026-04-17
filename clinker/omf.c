@@ -114,46 +114,72 @@ return 1;
 /* ----------------------------------------------------------
    OmfReadHeader
 
-   Read the OMF v2 segment header starting at startOff in fp.
+   Read one OMF v2 / v2.1 segment header starting at startOff.
    Fills seg fields and sets seg->fileBodyOffset to the body
-   start.  Returns 1 on success, 0 on EOF/error.
+   start.  Returns 1 on success, 0 on EOF or validation failure.
+
+   "Foreign file" rejection per GS/OS Reference Appendix F:
+       NUMSEX == 0, NUMLEN == 4, VERSION == 2,
+       BANKSIZE <= $10000, ALIGN in {0, $100, $10000}, LABLEN in {0, 10}.
+   Any of these out-of-range is a hard reject — clinker only targets
+   IIgs v2 OMF (see clinker/docs/clinker_build.md).
    ---------------------------------------------------------- */
 int OmfReadHeader(FILE *fp, InSeg *seg, long startOff)
 {
-dword blkcnt, resspc, length;
+dword bytecnt, resspc, length;
 word  kind, segnum, unused1;
 dword banksize, org, align, entry;
 word  dispname, dispbody;
+int   labLen, numLen, version, numSex;
 long  nameStart;
 
 if (fseek(fp, startOff, SEEK_SET) != 0)
     return 0;
 
-/* First field = total byte count of this segment on disk.
- * A zero or EOF here means no more segments -- clean end of iteration. */
+/* First field = BYTECNT (v2 format).  A zero/EOF here is a clean end
+ * of the segment iteration, not an error. */
 {
 int b0 = fgetc(fp);
+int b1, b2, b3;
 if (b0 == EOF) return 0;
-{
-int b1 = fgetc(fp);
-int b2 = fgetc(fp);
-int b3 = fgetc(fp);
+b1 = fgetc(fp);
+b2 = fgetc(fp);
+b3 = fgetc(fp);
 if (b1 == EOF || b2 == EOF || b3 == EOF) return 0;
-blkcnt = (dword)b0 | ((dword)b1 << 8) | ((dword)b2 << 16) | ((dword)b3 << 24);
+bytecnt = (dword)b0 | ((dword)b1 << 8) | ((dword)b2 << 16) | ((dword)b3 << 24);
 }
-}
-if (blkcnt == 0) return 0;
+if (bytecnt == 0) return 0;
 
 OmfReadDword(fp, &resspc);
-OmfReadDword(fp, &length);  /* logical body length */
+OmfReadDword(fp, &length);        /* logical body length */
 
-fgetc(fp);  /* unused */
-fgetc(fp);  /* LABLEN */
-fgetc(fp);  /* NUMLEN */
-fgetc(fp);  /* VERSION */
+fgetc(fp);                        /* unused */
+labLen  = fgetc(fp);              /* LABLEN  */
+numLen  = fgetc(fp);              /* NUMLEN  */
+version = fgetc(fp);              /* VERSION */
+
+/* Foreign-file checks (part 1): VERSION / NUMLEN / LABLEN */
+if (version != 2) {
+    LinkError("unsupported OMF version (expected 2)", seg->segName);
+    return 0;
+    }
+if (numLen != 4) {
+    LinkError("invalid NUMLEN (expected 4)", seg->segName);
+    return 0;
+    }
+if (labLen != 0 && labLen != 10) {
+    LinkError("invalid LABLEN (expected 0 or 10)", seg->segName);
+    return 0;
+    }
 
 OmfReadDword(fp, &banksize);
 seg->banksize = (long)banksize;
+
+/* Foreign-file check (part 2): BANKSIZE */
+if (banksize > 0x10000UL) {
+    LinkError("BANKSIZE exceeds $10000", seg->segName);
+    return 0;
+    }
 
 OmfReadWord(fp, &kind);
 seg->segType = (word)(kind & 0x1F);
@@ -165,8 +191,25 @@ seg->org = (long)org;
 OmfReadDword(fp, &align);
 seg->align = (long)align;
 
-fgetc(fp);   /* NUMSEX */
-fgetc(fp);   /* LANG   */
+/* Foreign-file check (part 3): ALIGN must be a value the loader
+ * natively supports — 0, $100, or $10000.  Anything else will be
+ * silently rounded up at load time, so we flag it at link time
+ * to make misuse obvious. */
+if (align != 0 && align != 0x100UL && align != 0x10000UL) {
+    LinkError("invalid ALIGN (expected 0, $100, or $10000)",
+              seg->segName);
+    return 0;
+    }
+
+numSex = fgetc(fp);               /* NUMSEX */
+fgetc(fp);                        /* LANG   */
+
+/* Foreign-file check (part 4): NUMSEX must be 0 (little-endian) */
+if (numSex != 0) {
+    LinkError("NUMSEX != 0 (big-endian OMF not supported)",
+              seg->segName);
+    return 0;
+    }
 
 OmfReadWord(fp, &segnum);
 OmfReadDword(fp, &entry);
@@ -201,10 +244,8 @@ for (p = seg->segName;  *p; p++) *p = (char)toupper(*p);
 /* Body starts at startOff + DISPDATA */
 seg->fileBodyOffset = startOff + (long)dispbody;
 
-/* Disk span = first header field, which is the total byte count of the
- * segment on disk (NOT a block count despite being called BLKCNT in
- * many docs -- DumpOBJ labels it "Byte count" which is correct). */
-seg->bodyLen = (long)blkcnt;
+/* Disk span for this segment (used by callers to find the next one). */
+seg->bodyLen = (long)bytecnt;
 
 return 1;
 }

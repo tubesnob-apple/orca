@@ -26,5 +26,9 @@ CLAUDE.md
 # Reference PDFs (too large for the repo; kept locally only)
 clinker/docs/*.pdf
 
+# Test harness build artifacts
+clinker/tests/obj/
+clinker/tests/out/
+
 # macOS
 .DS_Store

@@ -302,6 +302,13 @@ for (;;) {
                     pLen, shift, (long)(word)value, 1, (int)iSegNum, 0);
         }
     else if (op == OP_EXPR || op == OP_ZEXPR || op == OP_BEXPR) {
+        /* Evaluate the expression and emit pLen bytes into the LCONST
+         * image.  If the result is relocatable, record the reference
+         * value (result) in the RELOC/INTERSEG entry so the loader
+         * patches (segment_base + result).  The LCONST bytes are
+         * double-encoded (we keep them in place so a future Phase 9
+         * SUPER packer can read reference values back from LCONST);
+         * the loader overwrites them via the reloc dictionary. */
         byte pLen = (byte)OmfReadByte(inf->fp);
         byte buf[4] = {0, 0, 0, 0};
         int  i;
@@ -311,9 +318,9 @@ for (;;) {
         EmitData(out, buf, (long)pLen);
         if (needsReloc) {
             if (segOut != 0 && segOut != out->segNum)
-                AppendReloc(out, pc, pLen, 0, 0L, 1, segOut, 1);
+                AppendReloc(out, pc, pLen, 0, result, 1, segOut, 1);
             else
-                AppendReloc(out, pc, pLen, 0, 0L, 0, 0, 0);
+                AppendReloc(out, pc, pLen, 0, result, 0, 0, 0);
             }
         pc += pLen;
         }
@@ -353,7 +360,7 @@ for (;;) {
         EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc, EXPR_PHASE_RESOLVE);
         }
     else if (op == OP_LEXPR) {
-        /* LEXPR ($F3): patch in outer segment; same layout as EXPR */
+        /* LEXPR ($F3): patch in outer segment; same layout as EXPR. */
         byte pLen = (byte)OmfReadByte(inf->fp);
         byte buf[4] = {0, 0, 0, 0};
         int  i;
@@ -363,9 +370,9 @@ for (;;) {
         EmitData(out, buf, (long)pLen);
         if (needsReloc) {
             if (segOut != 0 && segOut != out->segNum)
-                AppendReloc(out, pc, pLen, 0, 0L, 1, segOut, 1);
+                AppendReloc(out, pc, pLen, 0, result, 1, segOut, 1);
             else
-                AppendReloc(out, pc, pLen, 0, 0L, 0, 0, 0);
+                AppendReloc(out, pc, pLen, 0, result, 0, 0, 0);
             }
         pc += pLen;
         }

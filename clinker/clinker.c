@@ -77,14 +77,20 @@ exit(1);
    ---------------------------------------------------------- */
 
 OutSeg *FindOrCreateOutSeg(const char *loadName, const char *segName,
-                            word segType)
+                            word kind)
 {
 OutSeg *s;
 
-/* Search for existing segment with matching name and type */
+/* Search for existing segment with matching name and type.  Per
+ * GS/OS Reference Appendix F, "if segment KINDs are specified in the
+ * source file, and the KINDs of the object segments placed in a given
+ * load segment are not all the same, the segment KIND of the first
+ * object segment determines the segment KIND of the entire load
+ * segment" — so the merge target keeps its original KIND and we do
+ * not accumulate flags from later contributing segments. */
 for (s = outSegs; s; s = s->next) {
     if (strcmp(s->segName, segName) == 0 &&
-        (s->segType & 0x1F) == (segType & 0x1F))
+        (s->segType & 0x1F) == (kind & 0x1F))
         return s;
     }
 
@@ -95,7 +101,8 @@ memset(s, 0, sizeof(OutSeg));
 
 strncpy(s->loadName, loadName, NAME_MAX - 1);
 strncpy(s->segName,  segName,  NAME_MAX - 1);
-s->segType   = segType & 0x1F;
+s->segType   = (word)(kind & 0x1F);
+s->kind      = kind;
 s->banksize  = 0x10000L;
 s->segNum    = ++numOutSegs;
 s->length    = 0;

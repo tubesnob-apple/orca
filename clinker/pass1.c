@@ -245,7 +245,7 @@ OutSeg *out;
 measured = MeasureBody(inf->fp, seg);
 if (measured < 0) return 0;
 
-out = FindOrCreateOutSeg(seg->loadName, seg->segName, seg->segType);
+out = FindOrCreateOutSeg(seg->loadName, seg->segName, seg->segkind);
 seg->outSegNum  = out->segNum;
 seg->baseOffset = out->length;
 out->length    += measured;

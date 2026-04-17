@@ -135,7 +135,8 @@ typedef struct OutSeg {
     char  loadName[NAME_MAX]; /* load (output file) name */
     char  segName[NAME_MAX];  /* segment name */
     int   segNum;             /* output segment number */
-    word  segType;            /* OMF segment type */
+    word  segType;            /* low 5 bits of KIND (enum-style type) */
+    word  kind;                /* full 16-bit KIND word: type + flags */
     long  length;             /* total byte length of combined data */
     long  org;                /* origin address (usually 0) */
     long  banksize;           /* bank size (usually $10000) */
@@ -281,7 +282,7 @@ void SkipExpr(FILE *fp, int phase);
 void   LinkError(const char *msg, const char *name);
 void   FatalError(const char *msg);
 OutSeg *FindOrCreateOutSeg(const char *loadName, const char *segName,
-                            word segType);
+                            word kind);
 OutSeg *OutSegByNum(int n);
 void   AppendReloc(OutSeg *seg, long pc, byte patchLen, byte shift,
                    long value, int type, int segNum, int fileNum);

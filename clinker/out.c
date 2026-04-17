@@ -99,7 +99,8 @@ OutSeg stub;
 memset(&stub, 0, sizeof(stub));
 strcpy(stub.segName,  "~ExpressLoad");
 strncpy(stub.loadName, loadName, NAME_MAX - 1);
-stub.segType  = SEGTYPE_EXPRESS;
+stub.segType  = (word)(SEGTYPE_EXPRESS & 0x1F);
+stub.kind     = SEGTYPE_EXPRESS;        /* full 16-bit KIND word */
 stub.banksize = 0x10000L;
 
 /* Body: segment count (word) + first-segment offset (dword) + END */

@@ -318,7 +318,7 @@ blkcnt   = totalLen;
 /* NUMLEN */  OmfWriteByte (fp, 4);
 /* VERSION */ OmfWriteByte (fp, 2);
 /* BANKSIZE */ OmfWriteDword(fp, seg->banksize ? seg->banksize : 0x10000L);
-/* KIND */    OmfWriteWord (fp, (int)seg->segType);
+/* KIND */    OmfWriteWord (fp, (int)(seg->kind ? seg->kind : seg->segType));
 /* unused */  OmfWriteWord (fp, 0);
 /* ORG */     OmfWriteDword(fp, seg->org);
 /* ALIGN */   OmfWriteDword(fp, seg->align);

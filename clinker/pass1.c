@@ -46,130 +46,8 @@
 
 #include "clinker.h"
 
-/* ----------------------------------------------------------
-   SkipExpression
-
-   Walk an expression stream (starting at current fp position)
-   until the $00 end opcode, advancing fp past it.
-   ---------------------------------------------------------- */
-static void SkipExpression(FILE *fp)
-{
-int op;
-for (;;) {
-    op = fgetc(fp);
-    if (op == EOF || op == EXPR_END) return;
-    if (op >= 0x01 && op <= 0x15) {
-        /* operator: no payload */
-        }
-    else if (op == EXPR_PC) {
-        /* no payload */
-        }
-    else if (op == EXPR_CONST || op == EXPR_SEGDISP) {
-        /* 4-byte payload */
-        fseek(fp, 4, SEEK_CUR);
-        }
-    else if (op == EXPR_WEAK || op == EXPR_STRONG ||
-             op == 0x84 || op == 0x85 || op == 0x86) {
-        /* pstring name: record as requested for library search */
-        char name[NAME_MAX];
-        int  nlen = fgetc(fp);
-        if (nlen != EOF && nlen > 0) {
-            int i, c;
-            for (i = 0; i < nlen && i < NAME_MAX - 1; i++) {
-                c = fgetc(fp);
-                if (c == EOF) break;
-                name[i] = (char)toupper(c);
-                }
-            name[i] = 0;
-            for (; i < nlen; i++) fgetc(fp);
-            SymRequest(name, 1);
-            }
-        }
-    }
-}
-
-/* ----------------------------------------------------------
-   EvalExpression
-
-   Evaluate an expression stream terminated by $00.
-   Sets *result to the computed value.
-   Sets *needsReloc if the result depends on a segment symbol.
-   Returns 1 on success.
-   ---------------------------------------------------------- */
-static int EvalExpression(FILE *fp, long pc,
-                          long *result, int *segOut,
-                          BOOLEAN *needsReloc)
-{
-long stack[32];
-int  top = 0;
-int  op;
-
-*result     = 0;
-*segOut     = 0;
-*needsReloc = FALSE;
-
-for (;;) {
-    op = fgetc(fp);
-    if (op == EOF || op == EXPR_END) break;
-
-    if (op >= 0x01 && op <= 0x15) {
-        long b = (top > 0) ? stack[--top] : 0;
-        long a = (top > 0) ? stack[--top] : 0;
-        long r = 0;
-        switch (op) {
-            case 0x01: r = a + b;  break;
-            case 0x02: r = a - b;  break;
-            case 0x03: r = a * b;  break;
-            case 0x04: r = b ? a / b : 0; break;
-            case 0x05: r = b ? a % b : 0; break;
-            case 0x06: r = ~b;     break;
-            case 0x09: r = a & b;  break;
-            case 0x0A: r = a | b;  break;
-            case 0x0B: r = a ^ b;  break;
-            default:   r = a + b;  break;
-            }
-        if (top < 32) stack[top++] = r;
-        }
-    else if (op == EXPR_PC) {
-        if (top < 32) stack[top++] = pc;
-        }
-    else if (op == EXPR_CONST) {
-        dword v;
-        OmfReadDword(fp, &v);
-        if (top < 32) stack[top++] = (long)v;
-        }
-    else if (op == EXPR_SEGDISP) {
-        dword v;
-        OmfReadDword(fp, &v);
-        if (top < 32) stack[top++] = (long)v;
-        *needsReloc = TRUE;
-        }
-    else if (op == EXPR_STRONG || op == EXPR_WEAK ||
-             op == 0x84 || op == 0x85 || op == 0x86) {
-        char name[NAME_MAX];
-        Symbol *sym;
-        OmfReadPString(fp, name, NAME_MAX);
-        {
-        char *p;
-        for (p = name; *p; p++) *p = (char)toupper(*p);
-        }
-        sym = SymFind(name);
-        if (!sym || !(sym->flags & SYM_PASS1_RESOLVED)) {
-            SymRequest(name, 1);  /* mark for library search */
-            if (top < 32) stack[top++] = 0;
-            } else {
-            if (top < 32) stack[top++] = sym->value;
-            if (!(sym->flags & SYM_IS_CONSTANT)) {
-                *segOut     = sym->segNum;
-                *needsReloc = TRUE;
-                }
-            }
-        }
-    }
-
-*result = (top > 0) ? stack[top - 1] : 0;
-return 1;
-}
+/* Expression handling lives in expr.c — pass 1 uses EXPR_PHASE_COLLECT
+ * to mark unresolved references for library search. */
 
 /* ----------------------------------------------------------
    ReadSymAttrs
@@ -205,13 +83,11 @@ int     isPrivate = 0;
 int     symFlags;
 long    value;
 BOOLEAN needsReloc;
-int     segOut;
+int     segOut, fileOut;
+char   *p;
 
 OmfReadPString(fp, name, NAME_MAX);
-{
-char *p;
 for (p = name; *p; p++) *p = (char)toupper(*p);
-}
 
 ReadSymAttrs(fp, &isPrivate);
 
@@ -222,7 +98,8 @@ if (opcode == OP_GLOBAL || opcode == OP_LOCAL) {
     value = pc;
     } else {
     /* EQU / GEQU: expression follows */
-    EvalExpression(fp, pc, &value, &segOut, &needsReloc);
+    EvalExpr(fp, pc, &value, &segOut, &fileOut, &needsReloc,
+             EXPR_PHASE_COLLECT);
     symFlags |= SYM_IS_CONSTANT;
     }
 
@@ -289,19 +166,19 @@ for (;;) {
         }
     else if (op == OP_EXPR || op == OP_ZEXPR || op == OP_BEXPR) {
         byte pLen = (byte)fgetc(fp);
-        SkipExpression(fp);
+        SkipExpr(fp, EXPR_PHASE_COLLECT);
         pc += (long)pLen;
         }
     else if (op == OP_RELEXPR) {
         byte pLen = (byte)fgetc(fp);
         fseek(fp, 4, SEEK_CUR);  /* base displacement */
-        SkipExpression(fp);
+        SkipExpr(fp, EXPR_PHASE_COLLECT);
         pc += (long)pLen;
         }
     else if (op == OP_LEXPR) {
         /* LEXPR ($F3): like EXPR but patch is in outer segment; same layout */
         byte pLen = (byte)fgetc(fp);
-        SkipExpression(fp);
+        SkipExpr(fp, EXPR_PHASE_COLLECT);
         pc += (long)pLen;
         }
     else if (op == OP_ENTRY) {
@@ -501,7 +378,7 @@ for (;;) {
         for (p = name; *p; p++) *p = (char)toupper(*p);
         }
         fseek(fp, 4, SEEK_CUR);  /* skip attrs */
-        SkipExpression(fp);
+        SkipExpr(fp, EXPR_PHASE_COLLECT);
         sym = SymFind(name);
         if (sym && (sym->flags & SYM_PASS1_REQUESTED) &&
                    !(sym->flags & SYM_PASS1_RESOLVED))
@@ -515,12 +392,12 @@ for (;;) {
     else if (op == OP_EXPR || op == OP_ZEXPR || op == OP_BEXPR ||
              op == OP_LEXPR) {
         fgetc(fp);
-        SkipExpression(fp);
+        SkipExpr(fp, EXPR_PHASE_COLLECT);
         }
     else if (op == OP_RELEXPR) {
         fgetc(fp);
         fseek(fp, 4, SEEK_CUR);
-        SkipExpression(fp);
+        SkipExpr(fp, EXPR_PHASE_COLLECT);
         }
     else if (op == OP_ENTRY) {
         word  w; dword v; int nlen;

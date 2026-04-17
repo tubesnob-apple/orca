@@ -15,84 +15,8 @@
 
 #include "clinker.h"
 
-/* ----------------------------------------------------------
-   Expression evaluation
-   Returns 1 on success.  Sets *result to the computed value.
-   Sets *segOut / *fileOut if the result requires relocation
-   (i.e., depends on a segment-relative symbol).
-   Sets *needsReloc if a RELOC or INTERSEG entry is required.
-   ---------------------------------------------------------- */
-int EvalExpr(FILE *fp, long pc, long *result, int *segOut, int *fileOut,
-             BOOLEAN *needsReloc)
-{
-long stack[32];
-int  top = 0;
-int  op;
-
-*result     = 0;
-*segOut     = 0;
-*fileOut    = 0;
-*needsReloc = FALSE;
-
-/* Expression is a stream of opcodes terminated by $00 (EXPR_END) */
-for (;;) {
-    op = fgetc(fp);
-    if (op == EOF || op == EXPR_END) break;
-
-    if (op >= 0x01 && op <= 0x15) {
-        long b = (top > 0) ? stack[--top] : 0;
-        long a = (top > 0) ? stack[--top] : 0;
-        long r = 0;
-        switch (op) {
-            case 0x01: r = a + b; break;
-            case 0x02: r = a - b; break;
-            case 0x03: r = a * b; break;
-            case 0x04: r = b ? a / b : 0; break;
-            case 0x05: r = b ? a % b : 0; break;
-            case 0x06: r = ~b;    break;
-            case 0x09: r = a & b; break;
-            case 0x0A: r = a | b; break;
-            case 0x0B: r = a ^ b; break;
-            default:   r = a + b; break;
-            }
-        if (top < 32) stack[top++] = r;
-        }
-    else if (op == EXPR_PC) {
-        if (top < 32) stack[top++] = pc;
-        }
-    else if (op == EXPR_CONST || op == EXPR_SEGDISP) {
-        dword v;
-        OmfReadDword(fp, &v);
-        if (top < 32) stack[top++] = (long)v;
-        if (op == EXPR_SEGDISP) *needsReloc = TRUE;
-        }
-    else if (op == EXPR_STRONG || op == EXPR_WEAK ||
-             op == 0x84 || op == 0x85 || op == 0x86) {
-        char name[NAME_MAX];
-        Symbol *sym;
-        OmfReadPString(fp, name, NAME_MAX);
-        {
-        char *p;
-        for (p = name; *p; p++) *p = (char)toupper(*p);
-        }
-        sym = SymFind(name);
-        if (!sym || !(sym->flags & SYM_PASS1_RESOLVED)) {
-            if (op == EXPR_STRONG)
-                LinkError("undefined symbol", name);
-            if (top < 32) stack[top++] = 0;
-            } else {
-            if (top < 32) stack[top++] = sym->value;
-            if (!(sym->flags & SYM_IS_CONSTANT)) {
-                *segOut     = sym->segNum;
-                *needsReloc = TRUE;
-                }
-            }
-        }
-    }
-
-*result = (top > 0) ? stack[top - 1] : 0;
-return 1;
-}
+/* Expression handling lives in expr.c — pass 2 uses EXPR_PHASE_RESOLVE
+ * so that unresolved STRONG references become link-time errors. */
 
 /* ----------------------------------------------------------
    Pass2Seg
@@ -214,7 +138,7 @@ for (;;) {
         byte pLen = (byte)OmfReadByte(inf->fp);
         byte buf[4] = {0, 0, 0, 0};
         int  i;
-        EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc);
+        EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc, EXPR_PHASE_RESOLVE);
         for (i = 0; i < pLen && i < 4; i++)
             buf[i] = (byte)(result >> (i * 8));
         EmitData(out, buf, (long)pLen);
@@ -234,7 +158,7 @@ for (;;) {
         int  i;
         OmfReadDword(inf->fp, &disp);
         base = (long)disp;
-        EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc);
+        EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc, EXPR_PHASE_RESOLVE);
         result -= base;  /* relative displacement */
         for (i = 0; i < pLen && i < 4; i++)
             buf[i] = (byte)(result >> (i * 8));
@@ -259,14 +183,14 @@ for (;;) {
         OmfReadWord(inf->fp, &lenAttr);
         fgetc(inf->fp);
         fgetc(inf->fp);
-        EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc);
+        EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc, EXPR_PHASE_RESOLVE);
         }
     else if (op == OP_LEXPR) {
         /* LEXPR ($F3): patch in outer segment; same layout as EXPR */
         byte pLen = (byte)OmfReadByte(inf->fp);
         byte buf[4] = {0, 0, 0, 0};
         int  i;
-        EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc);
+        EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc, EXPR_PHASE_RESOLVE);
         for (i = 0; i < pLen && i < 4; i++)
             buf[i] = (byte)(result >> (i * 8));
         EmitData(out, buf, (long)pLen);

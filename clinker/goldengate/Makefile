@@ -40,7 +40,7 @@ UTILITIES_DIR := $(GG_ROOT)/Utilities
 BIN_OUT := $(BIN_DIR)/clinker
 
 # -- Source modules -----------------------------------------------------------
-C_MODULES := clinker symbol omf pass1 pass2
+C_MODULES := clinker symbol omf pass1 pass2 expr out gsplus
 
 C_OBJS := $(foreach m,$(C_MODULES),$(OBJ_DIR)/$(m).a)
 

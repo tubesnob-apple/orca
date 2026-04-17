@@ -84,6 +84,10 @@ typedef unsigned long  dword;
 #define EXPR_STRONG   0x83
 #define EXPR_SEGDISP  0x87
 
+/* Expression evaluator phases (see expr.c) */
+#define EXPR_PHASE_COLLECT 1  /* pass 1: mark unresolved for lib search */
+#define EXPR_PHASE_RESOLVE 2  /* pass 2: error on unresolved STRONG     */
+
 /* ---------------------------------------------------------- */
 /* OMF segment type codes (low 5 bits)                        */
 /* ---------------------------------------------------------- */
@@ -265,8 +269,13 @@ void LibrarySearch(void);
 /* pass2.c */
 int  Pass2(void);
 int  Pass2Seg(InputFile *inf, InSeg *seg, OutSeg *out);
+
+/* expr.c — unified expression walker used by both passes.
+ * phase is EXPR_PHASE_COLLECT (pass 1) or EXPR_PHASE_RESOLVE (pass 2).
+ * Any of the output pointers may be NULL for "don't care". */
 int  EvalExpr(FILE *fp, long pc, long *result, int *segOut, int *fileOut,
-              BOOLEAN *needsReloc);
+              BOOLEAN *needsReloc, int phase);
+void SkipExpr(FILE *fp, int phase);
 
 /* clinker.c (helpers used by other modules) */
 void   LinkError(const char *msg, const char *name);
@@ -281,5 +290,8 @@ void   EmitData(OutSeg *seg, const byte *src, long len);
 void   EmitZero(OutSeg *seg, long len);
 void   InitGsplusSymbols(void);
 void   WriteSymbolFile(void);
+
+/* out.c */
+int    WriteOutput(void);
 
 #endif /* CLINKER_H */

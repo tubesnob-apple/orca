@@ -23,5 +23,8 @@ CLAUDE.md
 **/CLAUDE.md
 **/memory/
 
+# Reference PDFs (too large for the repo; kept locally only)
+clinker/docs/*.pdf
+
 # macOS
 .DS_Store

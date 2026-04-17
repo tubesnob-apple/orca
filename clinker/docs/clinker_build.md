@@ -332,6 +332,88 @@ harness from phase 1.
 
 ---
 
+## Library dictionary segment (KIND = $08) — from Apple's Appendix F
+
+Library files embed a single KIND=$08 segment that MakeLib fills in.
+The body is three LCONST records, in this order:
+
+1. **Filenames record** — sequence of `(word file_num, pstring filename)`
+   entries terminated by `file_num == 0`. file_num assigned by MakeLib.
+2. **Symbol table record** — fixed 12-byte entries, one per global symbol:
+   - `dword name_displacement` (into the symbol-names record)
+   - `word  file_number` (into filenames record)
+   - `word  private_flag` (1 = private, 0 = public)
+   - `dword segment_displacement` (file offset of the segment's header)
+3. **Symbol names record** — sequence of pstring names (length byte + up
+   to 255 chars); no terminator, walk to end of LCONST.
+
+Lookup flow for "does library L define symbol FOO?":
+
+1. Read symbol-names record, linear-scan for "FOO".
+2. If found, note the offset. Find the matching symbol-table entry (the
+   one whose `name_displacement` equals that offset).
+3. `segment_displacement` tells you exactly where in the library file the
+   object segment lives. Seek, read header, pass1/pass2 that segment.
+
+Replaces our current O(N²) whole-library rescans. Turns into O(names) per
+unresolved symbol.
+
+## Pathname segment (KIND = $04)
+
+Linker-emitted into load files that reference run-time libraries. Entry
+format, terminated by `file_num == 0`:
+
+    word   file_number         ; 1 = this load file itself
+    8bytes file_date_time      ; GS/OS ReadTimeHex
+    pstring pathname
+
+The loader compares the stored date/time to the actual RTL file at load
+time to detect version skew.
+
+## Jump-table segment (KIND = $02)
+
+One per load file (when dynamic segments are used). 14 bytes per entry,
+terminated by `load_file_num == 0`. **Unloaded** state (what we emit):
+
+    word  user_id              ; 0; loader patches at initial load
+    word  load_file_num
+    word  load_segment_num
+    dword load_segment_offset
+    dword jsl_to_loader        ; loader patches at initial load
+
+**Loaded** state (runtime transform — not our concern on output):
+
+    word  user_id
+    word  load_file_num
+    word  load_segment_num
+    dword load_segment_offset
+    dword jml_to_external_ref
+
+Historical: OMF v1/v2 jump-table segments start with 8 bytes of zeros
+before the first entry. v2.1 calls these out as possibly removable. For
+safety: emit the leading zeros; tolerate them on input.
+
+## SUPER subrecord type catalog (from Appendix F)
+
+There are 38 SUPER subrecord types. Pattern: `(type_byte, patch_bytes,
+bit_shift, file_num, segment_num_source)`.
+
+| Type  | Name             | Replaces   | Bytes | Shift | File | Segment                       |
+| ---   | ---              | ---        | ---   | ---   | ---  | ---                           |
+| 0     | RELOC2           | cRELOC     | 2     | 0     | —    | —                             |
+| 1     | RELOC3           | cRELOC     | 3     | 0     | —    | —                             |
+| 2     | INTERSEG1        | cINTERSEG  | 3     | 0     | 1    | in byte 2 of patched location |
+| 3-13  | INTERSEG2-12     | INTERSEG   | 3     | 0     | type-1| in byte 2 of patched location |
+| 14-25 | INTERSEG13-24    | cINTERSEG  | 2     | 0     | 1    | type - 12                     |
+| 26-37 | INTERSEG25-36    | cINTERSEG  | 2     | -16   | 1    | type - 24                     |
+
+For all SUPER types, the **offset to be patched** is reconstructed from
+(256-byte page * page_number) + in-page offset; the **reference value**
+lives in the LCONST at the patch location (2 bytes, little-endian). For
+SUPER INTERSEG1-12 (types 2-13), the **segment number** of the target
+lives in the third byte of the 3-byte patched location. See Appendix F
+pp. 463-464 for the full worked example.
+
 ## SUPER records — what we learned from OMFAnalyzer
 
 SUPER ($F7) is the compressed form of RELOC/cRELOC/INTERSEG. Our current
@@ -388,13 +470,17 @@ All local copies live under `clinker/docs/`:
 - `Loader Secrets.mhtml` — Neil Parker's ExpressLoad + loader internals.
 - `omfanalyzer.mhtml` — Brutal Deluxe's product page for OMFAnalyzer.
 
-Primary-source docs (not in repo):
-- **ORCA/M 2.0 manual, appendix B** — OMF v0/v1/v2.1 (p.488).
-- **Apple IIgs Programmer's Workshop Reference, chapter 7** — OMF v1/v2 (p.228).
-- **Apple IIgs GS/OS Reference, appendix F** — OMF v2.1; chapter 8 (p.205)
-  describes loader behavior. Two known errata: table F-2 says "blockCount"
-  where it should say SEGNAME, and lists tempOrg at $2a (actual: $2c).
-  "REVISION" field does not exist.
+Primary-source docs:
+- **GS/OS Reference, Appendix F** — OMF v2.1. Local copy
+  (Appendix F only): `clinker/docs/GSOSReferenceManual_Appendix-F-OMF.pdf`.
+  Extract text with `pdftotext -layout <pdf> <txt>` (install via
+  `brew install poppler`). Known errata from the community: table F-2
+  says "blockCount" where it should say SEGNAME; "REVISION" field does
+  not exist. (`tempOrg` location is actually $2c despite table F-2
+  listing $2a.)
+- **ORCA/M 2.0 manual, appendix B** — OMF v0/v1/v2.1 (p.488). Not in repo.
+- **Apple IIgs Programmer's Workshop Reference, chapter 7** — OMF v1/v2
+  (p.228). Not in repo.
 
 Reference implementations (not in repo):
 - **6502Bench SourceGen** — `~/source/iigs-official-repos/6502Bench/SourceGen/Tools/Omf/`

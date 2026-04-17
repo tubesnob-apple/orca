@@ -267,68 +267,53 @@ Full layout details in `docs/Loader Secrets.mhtml` (Neil Parker).
 
 ---
 
-## Current status (2026-04-17)
+## Current status
 
-**Committed baseline:**
-- Clinker compiles under GoldenGate and produces a binary at
-  `clinker/goldengate/clinker`.
-- End-to-end: reads OMF v2 OBJ/LIB/ROOT, walks passes 1 and 2, writes a load
-  file with RELOC/INTERSEG dictionary records. Handles the GSplus WDM
-  prologue and `.symbols` JSON emission mirroring linker.asm.
-- **Uncommitted WIP** (~450 added / 90 removed across
-  clinker.c/h, omf.c, pass1.c, pass2.c, goldengate/Makefile) extends record
-  coverage and fixes a handful of parsing gaps.
+**Builds end-to-end, test-minimal and test-reloc both PASS byte-identical
+with `iix link`.** Modules under `clinker/`:
 
-**Known correctness gaps — in priority order:**
-1. **SUPER input records are skipped** (`pass2.c:291-296`). Modern ORCA/C
-   output uses SUPER heavily. Dropping them drops relocations — this is a
-   real correctness bug, not "future work."
-2. **No foreign-file rejection.** We should enforce the five-rule check on
-   every segment header and refuse obviously-invalid inputs.
-3. **KIND flags dropped on output.** `OmfWriteSegHeader` writes only the low
-   5 bits; upper-byte flags (private, dynamic, reload, etc.) are lost.
-4. **ExpressLoad emission not implemented.** `opt_express` flag exists but
-   is never consumed by the output writer.
-5. **Library search is O(N²).** `LibrarySearch` rescans every library on
-   every iteration; doesn't read the library dictionary segment ($08).
-   Correct, but slow on ORCALib.
-6. **Symbol-record attribute handling** hardcodes v2 layout (correct for our
-   scope, but a VERSION=2 assertion would make that explicit).
-7. **Dead v0/v1 fallback paths** in `omf.c` (the `DISPNAME < $2C` branch) —
-   unreachable under v2-only, should be deleted for clarity.
+- `clinker.c` — main, globals, CLI, segment/reloc helpers
+- `omf.c` — OMF I/O primitives, header R/W, reloc sizing + SUPER packing
+- `out.c` — load file writer
+- `pass1.c` — body measure + symbol collect
+- `pass2.c` — data emit + reloc collect + SUPER unpack
+- `expr.c` — unified expression evaluator (COLLECT/RESOLVE phases)
+- `symbol.c` — hash-table symbol store
+- `gsplus.c` — `.symbols` JSON + `.sym65` SourceGen sidecar + `sfSig`
 
-**Not bugs, deliberate deferrals for now:**
-- No cRELOC/cINTERSEG emission on output (we emit full-size RELOC/INTERSEG).
-- No SUPER emission on output.
-- No library-dictionary writing (we don't produce libraries; that's
-  `makelib`'s job).
-- v2.1 `tempOrg` is read-transparent but not acted on.
+Test harness under `clinker/tests/` with `make all` running both cases.
 
----
+## Roadmap status
 
-## Roadmap (phased, correctness-first)
+| Phase | Item                                            | Status |
+| ---   | ---                                             | ---    |
+| 1     | Byte-diff test harness (minimal, reloc)         | **done** |
+| 2     | SUPER input record unpacking                    | **done** |
+| 3     | Foreign-file rejection in `OmfReadHeader`       | **done** |
+| 4     | `.sym65` platform-symbol sidecar                | **done** |
+| 5     | Full 16-bit KIND preservation on output         | **done** |
+| 8     | cRELOC / cINTERSEG output                       | **done** |
+| 9     | SUPER RELOC2/RELOC3 packing on output           | **done** |
 
-Each phase should land as small, reviewable commits, guarded by the test
-harness from phase 1.
+Adjacent correctness fix landed along the way:
+- Plain-RELOC/INTERSEG output now carries the correct `offsetReference`
+  value (was zero, which produced broken loads on non-SUPER paths).
 
-1. **Byte-diff test harness.** Link the same fixed set of OBJ/LIB inputs
-   with `iix link` (the ORCA/M reference) and `iix clinker` (ours), then
-   byte-compare the outputs. Any divergence is a ticket. Same pattern we
-   used to validate the `.symbols` feature.
-2. **SUPER input parsing.** Expand compressed RELOC/cRELOC/INTERSEG streams
-   into our internal RelocRec list. Single biggest correctness item.
-3. **Foreign-file rejection.** 5-line header check in `OmfReadHeader`.
-4. **`.sym65` sidecar emission.** Ten-line post-process that emits SourceGen-
-   compatible `LABEL @ $hex width` lines alongside `.symbols`. Adds a
-   second independent verifier (SourceGen) with almost no code.
-5. **KIND-flag preservation** on output: write the full 16-bit KIND, not
-   just the low 5 bits.
-6. **ExpressLoad emission** when `opt_express` is set. Remap symbol
-   segment numbers at the same time to kill the off-by-one.
-7. **Library-dictionary reader.** Use the $08 segment to target-look-up
-   symbols instead of rescanning whole libraries.
-8. **cRELOC/cINTERSEG emission** on output (size optimization).
-9. **SUPER emission** on output (further size optimization).
+**Remaining phases:**
+
+6. **ExpressLoad emission** when `opt_express` is set. Write a real
+   ExpressLoad segment (header-entry table + segment-remapping list per
+   Loader Secrets) as segment 1, and remap symbol `segment` fields in
+   `.symbols` to match the post-remap numbering. Nontrivial — bounded
+   but substantial write.
+7. **Library-dictionary reader.** Parse the KIND=$08 segment (three
+   LCONST records per Appendix F: filenames, symbol table, symbol
+   names). Replace `LibrarySearch`'s O(N²) full rescans with targeted
+   lookups keyed by symbol name. Perf, not correctness.
+9a. **INTERSEG SUPER packing.** Extend `OmfWriteSuper` to emit SUPER
+   INTERSEG1..36 subtypes. Today INTERSEG records always go out
+   individually as cINTERSEG/INTERSEG. Further size optimization,
+   unlocks byte-parity on inputs that use them.
 
 ---
 

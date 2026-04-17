@@ -61,6 +61,15 @@ switch (segType & 0x1F) {
     }
 }
 
+/* When opt_express is set the output file has an ExpressLoad segment at
+ * position 1, so every real data segment's post-remap SEGNUM is +1.
+ * We apply the same offset in the GSplus sidecars so external consumers
+ * (and symbols[].segment below) line up with the on-disk numbering. */
+static int PostExprSegNum(int rawSegNum)
+{
+return opt_express ? rawSegNum + 1 : rawSegNum;
+}
+
 static void EmitSegmentsArray(FILE *fp)
 {
 OutSeg *seg;
@@ -76,7 +85,8 @@ for (seg = outSegs; seg; seg = seg->next) {
          "\"type\":\"%s\","
          "\"org\":\"0x%08lX\","
          "\"length\":\"0x%08lX\"}",
-        seg->segNum, seg->segName, SegTypeString(seg->segType),
+        PostExprSegNum(seg->segNum), seg->segName,
+        SegTypeString(seg->segType),
         seg->org, seg->dataLen);
     }
 fprintf(fp, "]");
@@ -100,7 +110,7 @@ for (i = 0; i < SYM_HASH_SIZE; i++) {
              "\"segment\":\"0x%04X\","
              "\"offset\":\"0x%08lX\","
              "\"global\":%s}",
-            sym->name, sym->segNum, sym->value,
+            sym->name, PostExprSegNum(sym->segNum), sym->value,
             (sym->flags & SEGKIND_PRIVATE) ? "false" : "true");
         }
     }
@@ -181,13 +191,15 @@ for (i = 0; i < SYM_HASH_SIZE; i++) {
         long synthetic;
         if (!(sym->flags & SYM_PASS1_RESOLVED)) continue;
         if (sym->flags & SYM_IS_SEGMENT)        continue;
-        synthetic = ((long)sym->segNum << 16) | (sym->value & 0xFFFFL);
-        fprintf(fp, "%-24s @ $%06lX",
-                sym->name, synthetic);
+        {
+        int postSeg = PostExprSegNum(sym->segNum);
+        synthetic = ((long)postSeg << 16) | (sym->value & 0xFFFFL);
+        fprintf(fp, "%-24s @ $%06lX", sym->name, synthetic);
         if (sym->flags & SEGKIND_PRIVATE)
-            fprintf(fp, "        ; seg %d, private", sym->segNum);
+            fprintf(fp, "        ; seg %d, private", postSeg);
         else
-            fprintf(fp, "        ; seg %d", sym->segNum);
+            fprintf(fp, "        ; seg %d", postSeg);
+        }
         fprintf(fp, "\n");
         }
     }

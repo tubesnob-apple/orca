@@ -127,12 +127,12 @@ $(MINIMAL_OBJ)/minimal.a: $(MINIMAL_SRC)
 $(OUT)/minimal.iix: $(MINIMAL_OBJ)/minimal.a
 	@mkdir -p $(OUT)
 	@echo "--- iix link minimal ---"
-	cd $(MINIMAL_OBJ) && iix link -X minimal keep=$(OUT)/minimal.iix
+	cd $(MINIMAL_OBJ) && iix link minimal keep=$(OUT)/minimal.iix
 
 $(OUT)/minimal.clinker: $(MINIMAL_OBJ)/minimal.a
 	@mkdir -p $(OUT)
 	@echo "--- clinker minimal ---"
-	cd $(MINIMAL_OBJ) && iix $(CLINKER) -X minimal keep=$(OUT)/minimal.clinker
+	cd $(MINIMAL_OBJ) && iix $(CLINKER) minimal keep=$(OUT)/minimal.clinker
 
 test-minimal: $(OUT)/minimal.iix $(OUT)/minimal.clinker
 	$(call compare,minimal)
@@ -158,12 +158,12 @@ $(RELOC_OBJ)/reloc.a: $(RELOC_SRC)
 $(OUT)/reloc.iix: $(RELOC_OBJ)/reloc.a
 	@mkdir -p $(OUT)
 	@echo "--- iix link reloc ---"
-	cd $(RELOC_OBJ) && iix link -X reloc keep=$(OUT)/reloc.iix
+	cd $(RELOC_OBJ) && iix link reloc keep=$(OUT)/reloc.iix
 
 $(OUT)/reloc.clinker: $(RELOC_OBJ)/reloc.a
 	@mkdir -p $(OUT)
 	@echo "--- clinker reloc ---"
-	cd $(RELOC_OBJ) && iix $(CLINKER) -X reloc keep=$(OUT)/reloc.clinker
+	cd $(RELOC_OBJ) && iix $(CLINKER) reloc keep=$(OUT)/reloc.clinker
 
 test-reloc: $(OUT)/reloc.iix $(OUT)/reloc.clinker
 	$(call compare,reloc)
@@ -194,12 +194,12 @@ $(INTERSEG_OBJ)/interseg.ROOT: $(INTERSEG_SRC)
 $(OUT)/interseg.iix: $(INTERSEG_OBJ)/interseg.ROOT
 	@mkdir -p $(OUT)
 	@echo "--- iix link interseg ---"
-	cd $(INTERSEG_OBJ) && iix link -X interseg keep=$(OUT)/interseg.iix
+	cd $(INTERSEG_OBJ) && iix link interseg keep=$(OUT)/interseg.iix
 
 $(OUT)/interseg.clinker: $(INTERSEG_OBJ)/interseg.ROOT
 	@mkdir -p $(OUT)
 	@echo "--- clinker interseg ---"
-	cd $(INTERSEG_OBJ) && iix $(CLINKER) -X interseg keep=$(OUT)/interseg.clinker
+	cd $(INTERSEG_OBJ) && iix $(CLINKER) interseg keep=$(OUT)/interseg.clinker
 
 test-interseg: $(OUT)/interseg.iix $(OUT)/interseg.clinker
 	$(call compare,interseg)
@@ -230,12 +230,12 @@ DUMPOBJ_LIBS  := lib=/Library/GoldenGate/Libraries/ORCALib \
 $(OUT)/dumpobj.iix: $(DUMPOBJ_A).a
 	@mkdir -p $(OUT)
 	@echo "--- iix link dumpobj ---"
-	cd $(REPO_ROOT)/dumpobj/obj && iix link -X -o $(OUT)/dumpobj.iix DumpOBJ >/dev/null
+	cd $(REPO_ROOT)/dumpobj/obj && iix link -o $(OUT)/dumpobj.iix DumpOBJ >/dev/null
 
 $(OUT)/dumpobj.clinker: $(DUMPOBJ_A).a
 	@mkdir -p $(OUT)
 	@echo "--- clinker dumpobj ---"
-	iix $(CLINKER) -X -o $(OUT)/dumpobj.clinker $(DUMPOBJ_A) $(DUMPOBJ_LIBS) >/dev/null 2>&1
+	iix $(CLINKER) -o $(OUT)/dumpobj.clinker $(DUMPOBJ_A) $(DUMPOBJ_LIBS) >/dev/null 2>&1
 
 diverge-dumpobj: $(OUT)/dumpobj.iix $(OUT)/dumpobj.clinker
 	$(call compare_soft,dumpobj)

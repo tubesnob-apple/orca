@@ -35,7 +35,7 @@
 
 BOOLEAN  opt_list     = FALSE;
 BOOLEAN  opt_symbols  = FALSE;
-BOOLEAN  opt_express  = FALSE; /* express loading requires separate reloc dict; disabled until implemented */
+BOOLEAN  opt_express  = TRUE;  /* ExpressLoad on by default (matches iix link); -X disables */
 BOOLEAN  opt_pause    = FALSE;
 BOOLEAN  opt_memory   = FALSE;
 BOOLEAN  opt_compact  = TRUE;

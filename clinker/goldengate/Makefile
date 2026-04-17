@@ -29,7 +29,7 @@ ifeq ($(GG_ROOT),)
 $(error GoldenGate root not found. Set $$GOLDEN_GATE or $$ORCA_ROOT.)
 endif
 
-LANGUAGES_DIR := $(GG_ROOT)/Languages
+UTILITIES_DIR := $(GG_ROOT)/Utilities
 
 BIN_OUT := $(BIN_DIR)/clinker
 
@@ -69,8 +69,8 @@ $(BIN_OUT): $(C_OBJS) | $(BIN_DIR)
 # clinker is invoked as `iix clinker ...` (not `iix link ...`).
 # Install it to Languages/ alongside Linker.
 install: all
-	@echo "--- install clinker -> $(LANGUAGES_DIR)/clinker ---"
-	$(INSTALL_SH) $(BIN_OUT) $(LANGUAGES_DIR)/clinker $(GG_ROOT)
+	@echo "--- install clinker -> $(UTILITIES_DIR)/clinker ---"
+	$(INSTALL_SH) $(BIN_OUT) $(UTILITIES_DIR)/clinker $(GG_ROOT)
 
 # -- Clean --------------------------------------------------------------------
 clean:

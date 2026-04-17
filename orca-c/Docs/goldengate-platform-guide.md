@@ -40,7 +40,7 @@ GoldenGate is supported on macOS, Linux, Windows (via MSYS2/Git Bash), and Solar
 
 `$ORCA_ROOT` is also recognized as an alias for `$GOLDEN_GATE`.
 
-**macOS** users (GoldenGate 2.1.0+) have GoldenGate at `/Library/GoldenGate` (the system-wide installer default). Older installations at `~/Library/GoldenGate` are no longer supported as a default — set `$GOLDEN_GATE` if you need a non-standard path.
+**macOS** users have GoldenGate at `/Library/GoldenGate` (the system-wide installer default). Set `$GOLDEN_GATE` only if using a non-standard path.
 
 **Linux** users typically install to `/usr/local/share/GoldenGate` and must set
 `$GOLDEN_GATE` if using a non-standard path.

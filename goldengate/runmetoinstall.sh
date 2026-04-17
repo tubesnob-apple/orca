@@ -66,7 +66,7 @@ fi
 if [ -z "$TARGET" ]; then
     case "$OS" in
         macos)
-            for p in /Library/GoldenGate "$HOME/Library/GoldenGate"; do
+            for p in /Library/GoldenGate; do
                 [ -d "$p" ] && TARGET="$p" && break
             done ;;
         linux)

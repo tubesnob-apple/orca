@@ -136,3 +136,64 @@ fclose(fp);
 if (opt_progress)
     printf("Symbol file: %s\n", symPath);
 }
+
+/* ── .sym65 platform-symbol sidecar (for 6502Bench SourceGen) ──────────── */
+
+/*
+ * WriteSym65File — emit a .sym65 platform-symbol file alongside the
+ * .symbols JSON.  SourceGen's parser (PlatformSymbols.cs) accepts lines
+ * of the form:
+ *
+ *     LABEL @ $address  [width]  ; comment
+ *
+ * We can't emit absolute addresses — clinker's output is relocatable,
+ * the load address is set at runtime — so each symbol's address here
+ * is a synthetic "segment-ordinal bank + in-segment offset" of the
+ * form $SSOOOO where SS is the 1-based segment number and OOOO is the
+ * in-segment offset.  Users loading our output at a known base can
+ * compute absolute addresses as (base + OOOO) for the relevant segment.
+ * The comment on each line names the source segment.
+ */
+void WriteSym65File(void)
+{
+char   path[PATH_MAX + 16];
+FILE  *fp;
+int    i;
+Symbol *sym;
+
+if (!opt_gsplus || !keepName[0]) return;
+
+snprintf(path, sizeof(path), "%s.sym65", keepName);
+fp = fopen(path, "w");
+if (!fp) {
+    LinkError("cannot create .sym65 file", path);
+    return;
+    }
+
+fprintf(fp, "; clinker-generated platform-symbol file for SourceGen\n");
+fprintf(fp, "; target: %s\n", baseName);
+fprintf(fp, "; address encoding: $SSOOOO  (SS = segment #, OOOO = offset)\n");
+fprintf(fp, "; symsig: 0x%08lX\n", sfSig);
+fprintf(fp, "\n");
+
+for (i = 0; i < SYM_HASH_SIZE; i++) {
+    for (sym = symHash[i]; sym; sym = sym->next) {
+        long synthetic;
+        if (!(sym->flags & SYM_PASS1_RESOLVED)) continue;
+        if (sym->flags & SYM_IS_SEGMENT)        continue;
+        synthetic = ((long)sym->segNum << 16) | (sym->value & 0xFFFFL);
+        fprintf(fp, "%-24s @ $%06lX",
+                sym->name, synthetic);
+        if (sym->flags & SEGKIND_PRIVATE)
+            fprintf(fp, "        ; seg %d, private", sym->segNum);
+        else
+            fprintf(fp, "        ; seg %d", sym->segNum);
+        fprintf(fp, "\n");
+        }
+    }
+
+fclose(fp);
+
+if (opt_progress)
+    printf("Sym65  file: %s\n", path);
+}

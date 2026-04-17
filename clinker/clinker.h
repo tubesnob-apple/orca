@@ -290,6 +290,7 @@ void   EmitData(OutSeg *seg, const byte *src, long len);
 void   EmitZero(OutSeg *seg, long len);
 void   InitGsplusSymbols(void);
 void   WriteSymbolFile(void);
+void   WriteSym65File(void);
 
 /* out.c */
 int    WriteOutput(void);

@@ -384,9 +384,11 @@ if (!ok && numErrors > 0) {
 if (!opt_memory)
     ok = WriteOutput();
 
-/* Write GSplus symbol file */
-if (opt_gsplus)
+/* GSplus trace window + SourceGen platform-symbol sidecars */
+if (opt_gsplus) {
     WriteSymbolFile();
+    WriteSym65File();
+    }
 
 /* Optionally dump symbol table */
 if (opt_symbols)

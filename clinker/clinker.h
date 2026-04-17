@@ -216,10 +216,27 @@ extern BOOLEAN opt_gsplus;     /* gsplusSymbols shell var set */
 extern char    keepName[PATH_MAX];  /* keep= file name */
 extern char    baseName[PATH_MAX];  /* basename of keepName */
 
+/* Parsed entry from a library dictionary ($08) segment.
+ * See GS/OS Reference Appendix F for the on-disk format. */
+typedef struct LibSymEntry {
+    char    name[NAME_MAX];  /* uppercase symbol name */
+    long    segOffset;       /* file offset of the defining segment's header */
+    BOOLEAN isPrivate;       /* private_flag = 1 in the dictionary */
+} LibSymEntry;
+
 /* Library file (for deferred symbol extraction) */
 typedef struct LibFile {
     FILE           *fp;
     char            path[PATH_MAX];
+
+    /* Library-dictionary cache. Lazily initialised on first lookup.
+     * dictLoaded is set unconditionally so we don't re-scan on miss;
+     * dictValid is set only if a KIND=$08 segment was actually parsed. */
+    LibSymEntry    *syms;
+    int             numSyms;
+    BOOLEAN         dictLoaded;
+    BOOLEAN         dictValid;
+
     struct LibFile *next;
 } LibFile;
 
@@ -269,6 +286,10 @@ int  Pass1(void);
 int  Pass1Seg(InputFile *inf, InSeg *seg);
 long MeasureBody(FILE *fp, InSeg *seg);
 void LibrarySearch(void);
+
+/* libdict.c — library dictionary cache + lookup */
+void LibDictInit(LibFile *lf);
+long LibDictFind(LibFile *lf, const char *name);  /* -1 on miss */
 
 /* pass2.c */
 int  Pass2(void);

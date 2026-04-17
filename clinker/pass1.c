@@ -416,77 +416,162 @@ return 0;
 }
 
 /* ----------------------------------------------------------
+   Legacy full-rescan library search
+
+   Used only as a fallback for library files that lack a dictionary
+   segment (KIND=$08).  Real ORCA libraries all carry one; this path
+   mostly exists to accept hand-built library files.
+   ---------------------------------------------------------- */
+static void LibrarySearchLegacy(LibFile *lf, int *seqCounter)
+{
+long segOff = 0;
+
+for (;;) {
+    InSeg     *seg;
+    InputFile *inf;
+    long       diskLen;
+
+    seg = (InSeg *)malloc(sizeof(InSeg));
+    if (!seg) FatalError("out of memory (LibSeg)");
+    memset(seg, 0, sizeof(InSeg));
+
+    if (!OmfReadHeader(lf->fp, seg, segOff)) {
+        free(seg);
+        break;
+        }
+
+    diskLen = seg->bodyLen;
+    if (diskLen == 0) { free(seg); break; }
+
+    if (SegDefinesNeededSym(lf->fp, seg)) {
+        inf = (InputFile *)malloc(sizeof(InputFile));
+        if (!inf) FatalError("out of memory (LibInputFile)");
+        memset(inf, 0, sizeof(InputFile));
+        inf->fp      = lf->fp;
+        inf->isLib   = TRUE;
+        inf->fileNum = ++(*seqCounter);
+        strncpy(inf->name, lf->path, PATH_MAX - 1);
+        inf->segs    = seg;
+
+        if (!inputFiles) inputFiles = inf;
+        else             inputTail->next = inf;
+        inputTail = inf;
+
+        Pass1Seg(inf, seg);
+        }
+    else free(seg);
+
+    segOff += diskLen;
+    }
+
+fseek(lf->fp, 0L, SEEK_SET);
+}
+
+/* Dictionary-driven pull: fetch one specific segment from lf by its
+ * header file offset, add it to inputFiles, and pass-1 it. */
+static void PullLibSegment(LibFile *lf, long segOff, int *seqCounter)
+{
+InSeg     *seg;
+InputFile *inf;
+
+seg = (InSeg *)malloc(sizeof(InSeg));
+if (!seg) FatalError("out of memory (LibSeg)");
+memset(seg, 0, sizeof(InSeg));
+
+if (!OmfReadHeader(lf->fp, seg, segOff)) {
+    LinkError("library dictionary points at invalid segment offset",
+              lf->path);
+    free(seg);
+    return;
+    }
+
+inf = (InputFile *)malloc(sizeof(InputFile));
+if (!inf) FatalError("out of memory (LibInputFile)");
+memset(inf, 0, sizeof(InputFile));
+inf->fp      = lf->fp;
+inf->isLib   = TRUE;
+inf->fileNum = ++(*seqCounter);
+strncpy(inf->name, lf->path, PATH_MAX - 1);
+inf->segs    = seg;
+
+if (!inputFiles) inputFiles = inf;
+else             inputTail->next = inf;
+inputTail = inf;
+
+Pass1Seg(inf, seg);
+}
+
+/* ----------------------------------------------------------
    LibrarySearch
 
-   After Pass1, repeatedly scan library files for segments
-   that define symbols needed (SYM_PASS1_REQUESTED) but not
-   yet resolved.  Pull matching segments into inputFiles and
-   run Pass1Seg on them.  Repeat until stable.
+   Preferred path: consult each library's dictionary segment ($08)
+   and pull the exact defining segment for each SYM_PASS1_REQUESTED
+   symbol, iterating until no new requests appear.  Libraries without
+   a dictionary fall back to LibrarySearchLegacy (full rescan).
    ---------------------------------------------------------- */
 void LibrarySearch(void)
 {
-BOOLEAN changed;
+BOOLEAN    changed;
+LibFile   *lf;
+Symbol    *sym;
+int        i;
 static int libFileSeq = 0;
 
 if (!libFiles) return;
 
+/* Eagerly load every library's dictionary; any without one are
+ * handled by the legacy full-rescan below. */
+for (lf = libFiles; lf; lf = lf->next) LibDictInit(lf);
+
 do {
-    LibFile *lf;
     changed = FALSE;
 
-    for (lf = libFiles; lf; lf = lf->next) {
-        long segOff = 0;
+    for (i = 0; i < SYM_HASH_SIZE; i++) {
+        for (sym = symHash[i]; sym; sym = sym->next) {
+            if (!(sym->flags & SYM_PASS1_REQUESTED)) continue;
+            if (sym->flags & SYM_PASS1_RESOLVED)     continue;
 
-        for (;;) {
-            InSeg     *seg;
-            InputFile *inf;
-            long       diskLen;
+            for (lf = libFiles; lf; lf = lf->next) {
+                long off;
+                if (!lf->dictValid) continue;   /* legacy path covers these */
+                off = LibDictFind(lf, sym->name);
+                if (off < 0) continue;
 
-            seg = (InSeg *)malloc(sizeof(InSeg));
-            if (!seg) FatalError("out of memory (LibSeg)");
-            memset(seg, 0, sizeof(InSeg));
-
-            if (!OmfReadHeader(lf->fp, seg, segOff)) {
-                free(seg);
-                break;
-                }
-
-            diskLen = seg->bodyLen;
-            if (diskLen == 0) {
-                free(seg);
-                break;
-                }
-
-            if (SegDefinesNeededSym(lf->fp, seg)) {
-                /* Pull this segment: wrap in a minimal InputFile */
-                inf = (InputFile *)malloc(sizeof(InputFile));
-                if (!inf) FatalError("out of memory (LibInputFile)");
-                memset(inf, 0, sizeof(InputFile));
-                inf->fp      = lf->fp;
-                inf->isLib   = TRUE;
-                inf->fileNum = ++libFileSeq;
-                strncpy(inf->name, lf->path, PATH_MAX - 1);
-                inf->segs    = seg;
-
-                /* Append to inputFiles */
-                if (!inputFiles)
-                    inputFiles = inf;
-                else
-                    inputTail->next = inf;
-                inputTail = inf;
-
-                Pass1Seg(inf, seg);
+                PullLibSegment(lf, off, &libFileSeq);
                 changed = TRUE;
-                } else {
-                free(seg);
+                break;    /* first library wins */
                 }
-
-            segOff += diskLen;
             }
-
-        /* Reset library file position for next iteration */
-        fseek(lf->fp, 0, SEEK_SET);
         }
+    } while (changed);
+
+/* Dictionaries don't always list every symbol a library defines —
+ * some are emitted inside segments without a dictionary entry but
+ * can still satisfy external references.  After the dict-driven pass
+ * we sweep every remaining library with the legacy full-rescan for
+ * any symbols still unresolved.  The dict path is an optimization;
+ * full-rescan is the safety net. */
+do {
+    BOOLEAN anyPending = FALSE;
+    InputFile *before, *p;
+    long beforeCount = 0, afterCount;
+
+    for (i = 0; i < SYM_HASH_SIZE && !anyPending; i++)
+        for (sym = symHash[i]; sym; sym = sym->next)
+            if ((sym->flags & SYM_PASS1_REQUESTED) &&
+                !(sym->flags & SYM_PASS1_RESOLVED)) {
+                anyPending = TRUE;
+                break;
+                }
+    if (!anyPending) break;
+
+    for (before = inputFiles; before; before = before->next) beforeCount++;
+    changed = FALSE;
+    for (lf = libFiles; lf; lf = lf->next)
+        LibrarySearchLegacy(lf, &libFileSeq);
+    afterCount = 0;
+    for (p = inputFiles; p; p = p->next) afterCount++;
+    if (afterCount > beforeCount) changed = TRUE;
     } while (changed);
 }
 

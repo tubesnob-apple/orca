@@ -43,10 +43,13 @@ C_OBJS := $(foreach m,$(C_MODULES),$(OBJ_DIR)/$(m).a)
 all: $(BIN_OUT)
 
 # -- Compile rules ------------------------------------------------------------
-# ORCA/C compile: cd to OBJ_DIR so .a and .root land there, then compile
+# ORCA/C compile: cd to SRC_DIR so #include "clinker.h" resolves, then
+# move the resulting .a (and optional .root) into OBJ_DIR.
 $(OBJ_DIR)/%.a: $(SRC_DIR)/%.c | $(OBJ_DIR)
 	@echo "--- compile $*.c ---"
-	cd $(OBJ_DIR) && $(CC) $(SRC_DIR)/$*.c
+	cd $(SRC_DIR) && $(CC) $*.c
+	mv $(SRC_DIR)/$*.a $@
+	-mv $(SRC_DIR)/$*.root $(OBJ_DIR)/$*.root 2>/dev/null; true
 
 $(OBJ_DIR):
 	mkdir -p $(OBJ_DIR)

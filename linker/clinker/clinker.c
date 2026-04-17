@@ -478,7 +478,10 @@ for (i = 1; i <= argc; i++) {
     if (arg[0] == '+' || arg[0] == '-') {
         ParseFlag(arg);
         }
-    else if (strncasecmp(arg, "keep=", 5) == 0) {
+    else if ((toupper((int)arg[0]) == 'K') &&
+             (toupper((int)arg[1]) == 'E') &&
+             (toupper((int)arg[2]) == 'E') &&
+             (toupper((int)arg[3]) == 'P') && arg[4] == '=') {
         strncpy(keepName, arg + 5, PATH_MAX - 1);
         SetBaseName();
         }

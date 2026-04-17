@@ -340,37 +340,90 @@ return ftell(fp);
 }
 
 /* ----------------------------------------------------------
-   OmfWriteReloc
+   Relocation-record sizing + emission
 
-   Emit a RELOC ($E2) or INTERSEG ($E3) dictionary record.
+   Each RelocRec maps to one of four OMF output records:
+     type=0, 16-bit fit     -> cRELOC    ($F5) —  7 bytes
+     type=0, else           -> RELOC     ($E2) — 11 bytes
+     type=1, cINTERSEG fit  -> cINTERSEG ($F6) —  8 bytes
+     type=1, else           -> INTERSEG  ($E3) — 15 bytes
+   Compact forms per Appendix F Table F-3 require:
+     cRELOC     — pc fits 16 bits, value fits 16 bits
+     cINTERSEG  — pc fits 16 bits, value fits 16 bits,
+                  segNum fits 8 bits, fileNum == 1
    ---------------------------------------------------------- */
-void OmfWriteReloc(FILE *fp, RelocRec *r)
+
+static BOOLEAN FitsCReloc(const RelocRec *r)
+{
+return (r->pc    >= 0 && r->pc    < 0x10000L &&
+        r->value >= 0 && r->value < 0x10000L);
+}
+
+static BOOLEAN FitsCInterseg(const RelocRec *r)
+{
+return (r->pc      >= 0 && r->pc      < 0x10000L &&
+        r->value   >= 0 && r->value   < 0x10000L &&
+        r->segNum  >= 0 && r->segNum  < 0x100    &&
+        r->fileNum == 1);
+}
+
+long OmfRelocSize(const RelocRec *r)
+{
+if (r->type == 0)
+    return FitsCReloc(r)    ?  7L : 11L;   /* cRELOC vs RELOC */
+else
+    return FitsCInterseg(r) ?  8L : 15L;   /* cINTERSEG vs INTERSEG */
+}
+
+void OmfWriteReloc(FILE *fp, const RelocRec *r)
 {
 if (r->type == 0) {
-    /* RELOC: opcode(1) patchLen(1) shift(1) pc(4) value(4) */
-    OmfWriteByte (fp, OP_RELOC);
-    OmfWriteByte (fp, r->patchLen);
-    OmfWriteByte (fp, r->shift);
-    OmfWriteDword(fp, r->pc);
-    OmfWriteDword(fp, r->value);
-    } else {
-    /* INTERSEG: op(1) pLen(1) shift(1) pc(4) fileNum(2) segNum(2) addend(4) */
-    OmfWriteByte (fp, OP_INTERSEG);
-    OmfWriteByte (fp, r->patchLen);
-    OmfWriteByte (fp, r->shift);
-    OmfWriteDword(fp, r->pc);
-    OmfWriteWord (fp, r->fileNum);
-    OmfWriteWord (fp, r->segNum);
-    OmfWriteDword(fp, r->value);  /* addend */
+    if (FitsCReloc(r)) {
+        /* cRELOC: opcode(1) pLen(1) shift(1) pc16(2) value16(2) */
+        OmfWriteByte(fp, OP_CRELOC);
+        OmfWriteByte(fp, r->patchLen);
+        OmfWriteByte(fp, r->shift);
+        OmfWriteWord(fp, (int)r->pc);
+        OmfWriteWord(fp, (int)r->value);
+        }
+    else {
+        /* RELOC: opcode(1) pLen(1) shift(1) pc(4) value(4) */
+        OmfWriteByte (fp, OP_RELOC);
+        OmfWriteByte (fp, r->patchLen);
+        OmfWriteByte (fp, r->shift);
+        OmfWriteDword(fp, r->pc);
+        OmfWriteDword(fp, r->value);
+        }
+    }
+else {
+    if (FitsCInterseg(r)) {
+        /* cINTERSEG: op(1) pLen(1) shift(1) pc16(2) segNum(1) value16(2) */
+        OmfWriteByte(fp, OP_CINTERSEG);
+        OmfWriteByte(fp, r->patchLen);
+        OmfWriteByte(fp, r->shift);
+        OmfWriteWord(fp, (int)r->pc);
+        OmfWriteByte(fp, (int)r->segNum);
+        OmfWriteWord(fp, (int)r->value);
+        }
+    else {
+        /* INTERSEG: op(1) pLen(1) shift(1) pc(4) fileNum(2) segNum(2) value(4) */
+        OmfWriteByte (fp, OP_INTERSEG);
+        OmfWriteByte (fp, r->patchLen);
+        OmfWriteByte (fp, r->shift);
+        OmfWriteDword(fp, r->pc);
+        OmfWriteWord (fp, r->fileNum);
+        OmfWriteWord (fp, r->segNum);
+        OmfWriteDword(fp, r->value);
+        }
     }
 }
 
-/* ----------------------------------------------------------
-   OmfWriteSuper
-
-   Emit all relocation records for one output segment.
-   Writes plain RELOC/INTERSEG records (no SUPER packing for now).
-   ---------------------------------------------------------- */
+/*
+ * OmfWriteSuper — emit the entire reloc dictionary for one output
+ * segment.  Today this just walks the RelocRec list and writes each
+ * entry individually (cRELOC/RELOC/cINTERSEG/INTERSEG).  Phase 9 will
+ * group compatible entries and pack them into SUPER records.
+ */
 void OmfWriteSuper(FILE *fp, OutSeg *seg)
 {
 RelocRec *r;

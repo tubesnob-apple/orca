@@ -258,7 +258,8 @@ void    OmfWriteDword(FILE *fp, long v);
 void    OmfWritePString(FILE *fp, const char *s);
 long    OmfWriteSegHeader(FILE *fp, OutSeg *seg, long bodyLen, int segNum,
                           const char *loadName);
-void    OmfWriteReloc(FILE *fp, RelocRec *r);
+long    OmfRelocSize(const RelocRec *r);
+void    OmfWriteReloc(FILE *fp, const RelocRec *r);
 void    OmfWriteSuper(FILE *fp, OutSeg *seg);
 
 /* pass1.c */

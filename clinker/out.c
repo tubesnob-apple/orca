@@ -41,7 +41,7 @@ long n = 0;
 RelocRec *r;
 
 for (r = seg->relocHead; r; r = r->next)
-    n += (r->type == 0) ? 11L : 15L;
+    n += OmfRelocSize(r);
 
 if (seg->dataLen > 0)
     n += 1L + 4L + seg->dataLen + 1L;    /* LCONST frame + END */

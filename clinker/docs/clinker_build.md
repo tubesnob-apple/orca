@@ -269,51 +269,77 @@ Full layout details in `docs/Loader Secrets.mhtml` (Neil Parker).
 
 ## Current status
 
-**Builds end-to-end, test-minimal and test-reloc both PASS byte-identical
-with `iix link`.** Modules under `clinker/`:
+**Builds end-to-end; all three MUST_PASS tests (minimal, reloc,
+interseg) produce byte-identical output with `iix link`.** Real-world
+smoke test: linking `DumpOBJ` against `ORCALib + SysFloat + SysLib`
+succeeds with zero undefined-symbol errors.
+
+Modules under `clinker/`:
 
 - `clinker.c` — main, globals, CLI, segment/reloc helpers
 - `omf.c` — OMF I/O primitives, header R/W, reloc sizing + SUPER packing
 - `out.c` — load file writer
-- `pass1.c` — body measure + symbol collect
+- `pass1.c` — body measure + symbol collect + library search
 - `pass2.c` — data emit + reloc collect + SUPER unpack
 - `expr.c` — unified expression evaluator (COLLECT/RESOLVE phases)
 - `symbol.c` — hash-table symbol store
 - `gsplus.c` — `.symbols` JSON + `.sym65` SourceGen sidecar + `sfSig`
+- `libdict.c` — library-dictionary parser + binary-search lookup
 
-Test harness under `clinker/tests/` with `make all` running both cases.
+Test harness under `clinker/tests/` with `make all` running all cases.
 
 ## Roadmap status
 
 | Phase | Item                                            | Status |
 | ---   | ---                                             | ---    |
-| 1     | Byte-diff test harness (minimal, reloc)         | **done** |
+| 1     | Byte-diff test harness                          | **done** |
 | 2     | SUPER input record unpacking                    | **done** |
 | 3     | Foreign-file rejection in `OmfReadHeader`       | **done** |
 | 4     | `.sym65` platform-symbol sidecar                | **done** |
 | 5     | Full 16-bit KIND preservation on output         | **done** |
+| 6     | ExpressLoad emission                            | deferred |
+| 7     | Library-dictionary reader                       | **done** |
 | 8     | cRELOC / cINTERSEG output                       | **done** |
 | 9     | SUPER RELOC2/RELOC3 packing on output           | **done** |
+| 9a    | SUPER INTERSEG packing on output                | **done** |
 
-Adjacent correctness fix landed along the way:
-- Plain-RELOC/INTERSEG output now carries the correct `offsetReference`
-  value (was zero, which produced broken loads on non-SUPER paths).
+Adjacent correctness fixes that landed along the way:
+- Plain RELOC/INTERSEG output now carries the correct `offsetReference`
+  value (was zero — previously produced broken loads on non-SUPER paths).
+- `EXPR_WEAK` references no longer trigger library search (spec says
+  WEAK resolves to 0 when unresolved; pulling segments for weak refs
+  was over-inclusion).
+- Input file order is now `.ROOT` before `.a / .A` when the argument
+  has no extension (matches iix link's convention; wrong order caused
+  multi-segment merges to land at different LCONST offsets).
+- `FindOrCreateOutSeg` merges by LOADNAME only; segment KIND no longer
+  blocks the merge, so segments with different KINDs but the same load
+  name collapse into one load segment (first-seen KIND wins).
+- `OP_CINTERSEG` input now records `fileNum=1` instead of 0 (cINTERSEG
+  is implicitly file=1 per the spec; needed so re-emission as SUPER
+  INTERSEG13..36 qualifies).
 
-**Remaining phases:**
+## Deferred: Phase 6 — ExpressLoad emission
 
-6. **ExpressLoad emission** when `opt_express` is set. Write a real
-   ExpressLoad segment (header-entry table + segment-remapping list per
-   Loader Secrets) as segment 1, and remap symbol `segment` fields in
-   `.symbols` to match the post-remap numbering. Nontrivial — bounded
-   but substantial write.
-7. **Library-dictionary reader.** Parse the KIND=$08 segment (three
-   LCONST records per Appendix F: filenames, symbol table, symbol
-   names). Replace `LibrarySearch`'s O(N²) full rescans with targeted
-   lookups keyed by symbol name. Perf, not correctness.
-9a. **INTERSEG SUPER packing.** Extend `OmfWriteSuper` to emit SUPER
-   INTERSEG1..36 subtypes. Today INTERSEG records always go out
-   individually as cINTERSEG/INTERSEG. Further size optimization,
-   unlocks byte-parity on inputs that use them.
+Not a correctness gap.  GS/OS v5.0+ loads files fine without an
+ExpressLoad stub; it's a speed optimisation only.  Implementing it
+requires a two-pass file write (seg-offset tables depend on the stub's
+own size) plus the header-info array from Loader Secrets, plus a
+symbol-segment-number remap so our `.symbols`/`.sym65` sidecars stay
+consistent with the post-remap segment numbering.  Revisit if load
+speed becomes a visible concern or if we need byte-parity with iix
+link's default output (which does include ExpressLoad unless `-X`).
+
+## Known gap
+
+Linking a real ORCA/C program (e.g. DumpOBJ) produces ~40% more bytes
+than iix link (71 KB vs 50 KB).  The 3-test suite passes byte-
+identical, so basic RELOC/INTERSEG/SUPER handling is correct; the size
+difference looks like library-side over-inclusion — we pull more
+segments than iix does.  Worth investigating: is iix pruning segments
+whose symbols are only weakly referenced from other pulled segments?
+Are we propagating symbol requests through segments we pulled as
+transitive dependencies?  Diagnosis pending.
 
 ---
 

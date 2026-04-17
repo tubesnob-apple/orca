@@ -109,11 +109,19 @@ for (;;) {
 
         sym = SymFind(name);
         if (!sym || !(sym->flags & SYM_PASS1_RESOLVED)) {
-            if (phase == EXPR_PHASE_COLLECT) {
-                SymRequest(name, 1);
-                }
-            else if (op == EXPR_STRONG) {
-                LinkError("undefined symbol", name);
+            /* A WEAK reference ($82) by spec resolves to 0 if unknown
+             * and MUST NOT force library search — otherwise we pull
+             * library segments that the program would otherwise omit.
+             * STRONG ($83) and the attribute references ($84-$86)
+             * all require the symbol to exist, so they do trigger
+             * library search in phase 1 and error in phase 2. */
+            if (op != EXPR_WEAK) {
+                if (phase == EXPR_PHASE_COLLECT) {
+                    SymRequest(name, 1);
+                    }
+                else if (op == EXPR_STRONG) {
+                    LinkError("undefined symbol", name);
+                    }
                 }
             if (top < EXPR_STACK_DEPTH) stack[top++] = 0;
             }

@@ -19,6 +19,173 @@
  * so that unresolved STRONG references become link-time errors. */
 
 /* ----------------------------------------------------------
+   SUPER record unpacker
+
+   SUPER ($F7) is a packed form of RELOC/cRELOC/INTERSEG/cINTERSEG
+   that encodes only the patch offsets — the value to be relocated
+   is read back from the already-emitted LCONST bytes in the output
+   segment at the patch location.
+
+   Layout (opcode already consumed by the caller):
+     dword length    — size of the rest of the record
+     byte  type      — 0..37 (see table below)
+     ...             — packed subrecord stream, length - 1 bytes
+
+   Each subrecord starts with a Count byte:
+     Count & $80 set  — skip (Count & $7F) 256-byte pages of the segment
+     Count & $80 clr  — (Count + 1) in-page 1-byte offsets follow; the
+                        current page advances by one after processing
+
+   SUPER type classification (GS/OS Reference Appendix F p.463):
+
+     0          RELOC2      2-byte patch, shift=0, intra-segment
+     1          RELOC3      3-byte patch, shift=0, intra-segment
+     2          INTERSEG1   3-byte, shift=0, file=1,  seg in LCONST byte 2
+     3..13      INTERSEG2..12    3-byte, shift=0, file=type-1, seg in byte 2
+     14..25     INTERSEG13..24   2-byte, shift=0,  file=1, seg=type-13
+     26..37     INTERSEG25..36   2-byte, shift=-16, file=1, seg=type-25
+
+   For every patch emitted, OffsetReference is read from out->data at
+   the patch location using patchLen bytes; for INTERSEG1..12 the
+   target-segment byte is at patchLocation+2.
+   ---------------------------------------------------------- */
+
+/* Classify a SUPER type byte into the patch shape it describes. */
+typedef struct {
+    byte patchLen;     /* 2 or 3 */
+    byte shift;        /* 0 or 0xF0 (= -16 in two's complement) */
+    int  fileNum;      /* 0 for intra-seg RELOC, else file number */
+    int  fixedSeg;     /* 0 = read seg from LCONST byte 2; >0 = use this */
+    int  isInterseg;   /* 1 if we emit INTERSEG, 0 if plain RELOC */
+    int  valid;        /* 0 = unknown subtype */
+} SuperShape;
+
+static SuperShape ClassifySuper(byte type)
+{
+SuperShape s = { 0, 0, 0, 0, 0, 0 };
+
+if (type == 0x00)        { s.patchLen = 2; s.isInterseg = 0; s.valid = 1; }
+else if (type == 0x01)   { s.patchLen = 3; s.isInterseg = 0; s.valid = 1; }
+else if (type <= 0x0D)   { s.patchLen = 3; s.isInterseg = 1;
+                           s.fileNum  = type - 1;
+                           s.valid    = 1; }
+else if (type <= 0x19)   { s.patchLen = 2; s.isInterseg = 1;
+                           s.fileNum  = 1;
+                           s.fixedSeg = type - 13;
+                           s.valid    = 1; }
+else if (type <= 0x25)   { s.patchLen = 2; s.isInterseg = 1;
+                           s.shift    = 0xF0;   /* right-shift 16, bank byte */
+                           s.fileNum  = 1;
+                           s.fixedSeg = type - 25;
+                           s.valid    = 1; }
+
+return s;
+}
+
+/* Read `len` little-endian bytes from out->data at absPatch; clamp to
+ * the segment buffer for safety. */
+static long ReadLConstValue(OutSeg *out, long absPatch, int len)
+{
+long v = 0;
+int  i;
+
+for (i = 0; i < len; i++) {
+    if (absPatch + i < 0 || absPatch + i >= out->dataLen)
+        return 0;
+    v |= ((long)out->data[absPatch + i]) << (i * 8);
+    }
+return v;
+}
+
+/* Emit one unpacked patch from a SUPER subrecord. */
+static void EmitSuperPatch(OutSeg *out, const SuperShape *s,
+                           long absPatch)
+{
+long value;
+int  tgtSeg;
+
+if (absPatch + s->patchLen > out->dataLen) {
+    LinkError("SUPER offset past end of LCONST", out->segName);
+    return;
+    }
+
+value = ReadLConstValue(out, absPatch, s->patchLen);
+
+if (!s->isInterseg) {
+    /* SUPER RELOC2/RELOC3: intra-segment */
+    AppendReloc(out, absPatch, s->patchLen, s->shift, value, 0, 0, 0);
+    return;
+    }
+
+if (s->fixedSeg > 0) {
+    /* INTERSEG13..36: segment # is fixed by type */
+    tgtSeg = s->fixedSeg;
+    }
+else {
+    /* INTERSEG1..12: segment # is in the third byte of the patch */
+    tgtSeg = (int)out->data[absPatch + 2];
+    /* Value is the 16-bit offset (low bytes); drop the segment byte */
+    value &= 0xFFFFL;
+    }
+
+AppendReloc(out, absPatch, s->patchLen, s->shift, value, 1,
+            tgtSeg, s->fileNum);
+}
+
+/*
+ * Pass2Super — consume one SUPER record from fp (the opcode has already
+ * been consumed by the caller) and append the unpacked relocations to
+ * `out`.  `baseOffset` is the offset of the current input segment
+ * within `out` (so an in-segment patch offset O becomes an output
+ * address of baseOffset+O).
+ */
+static void Pass2Super(FILE *fp, OutSeg *out, long baseOffset)
+{
+dword      totalLen;
+byte       typeByte;
+long       endPos;
+int        page = 0;
+SuperShape shape;
+
+OmfReadDword(fp, &totalLen);
+endPos = ftell(fp) + (long)totalLen;
+
+typeByte = (byte)OmfReadByte(fp);
+shape    = ClassifySuper(typeByte);
+
+if (!shape.valid) {
+    LinkError("unknown SUPER subtype", out->segName);
+    fseek(fp, endPos, SEEK_SET);
+    return;
+    }
+
+while (ftell(fp) < endPos) {
+    byte count = (byte)OmfReadByte(fp);
+
+    if (count & 0x80) {
+        page += (count & 0x7F);
+        continue;
+        }
+
+    /* Non-skip subrecord: (count + 1) in-page 1-byte offsets follow. */
+    {
+    int n = (int)count + 1;
+    int i;
+    for (i = 0; i < n; i++) {
+        byte  inPage    = (byte)OmfReadByte(fp);
+        long  offset    = ((long)page << 8) | (long)inPage;
+        long  absPatch  = offset + baseOffset;
+        EmitSuperPatch(out, &shape, absPatch);
+        }
+    }
+    page++;
+    }
+
+/* Defensive: if the stream didn't exactly hit endPos, realign. */
+fseek(fp, endPos, SEEK_SET);
+}
+
+/* ----------------------------------------------------------
    Pass2Seg
 
    Second pass over one input segment body.  Appends data to
@@ -213,11 +380,10 @@ for (;;) {
         if (nlen != EOF) fseek(inf->fp, nlen, SEEK_CUR);
         }
     else if (op == OP_SUPER) {
-        /* SUPER records in input: translate to RELOC/INTERSEG.       *
-         * Currently we skip -- proper SUPER parsing is a future item. */
-        dword len;
-        OmfReadDword(inf->fp, &len);
-        fseek(inf->fp, (long)len, SEEK_CUR);
+        /* SUPER: packed RELOC/INTERSEG form; unpack into our RelocRec
+         * list.  Reads reference values back from the emitted LCONST
+         * bytes in out->data at each patch offset (see Pass2Super). */
+        Pass2Super(inf->fp, out, seg->baseOffset);
         }
     else if (op == OP_STRONG || op == OP_USING) {
         int nlen = fgetc(inf->fp);

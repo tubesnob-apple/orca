@@ -35,19 +35,33 @@ OBJ := $(MAKEFILE_DIR)obj
 OUT := $(MAKEFILE_DIR)out
 
 # ── Test case registry ──────────────────────────────────────────────────────
-TESTS := minimal
+#
+# MUST_PASS   — cases expected to produce byte-identical output with iix link.
+#               A failure here fails `make all`.
+# DIVERGE     — cases whose output is *valid* OMF but known to differ from
+#               iix link because of deferred work (e.g. we emit plain RELOC
+#               where iix link packs into SUPER).  Run and reported, but do
+#               not fail `make all`.  Each should migrate to MUST_PASS as the
+#               corresponding roadmap phase lands.
+TESTS       := minimal reloc
+MUST_PASS   := minimal
+DIVERGE     := reloc
 
-.PHONY: all clean $(TESTS:%=test-%) help
+.PHONY: all clean help $(TESTS:%=test-%) $(DIVERGE:%=diverge-%)
 .DEFAULT_GOAL := all
 
-all: $(TESTS:%=test-%)
+all: $(MUST_PASS:%=test-%) $(DIVERGE:%=diverge-%)
 	@echo ""
 	@echo "All $(words $(TESTS)) test(s) complete."
+	@echo "  must-pass: $(words $(MUST_PASS))  diverge: $(words $(DIVERGE))"
 
 help:
 	@echo "Test cases: $(TESTS)"
-	@echo "Run a single case:  make test-<name>"
-	@echo "Example:            make test-minimal"
+	@echo "  must-pass: $(MUST_PASS)"
+	@echo "  diverge:   $(DIVERGE)"
+	@echo ""
+	@echo "Run a single case:   make test-<name>"
+	@echo "Run a diverge case:  make diverge-<name>"
 
 clean:
 	rm -rf $(OBJ) $(OUT)
@@ -73,6 +87,22 @@ define compare
 	  echo "  --- first differing bytes ---"; \
 	  diff -u $(OUT)/$(1).iix.hex $(OUT)/$(1).clinker.hex | head -40 || true; \
 	  exit 1; \
+	fi
+endef
+
+# compare_soft(case_name) — like compare, but divergence is reported as
+# DIVERGE rather than FAIL, and never fails the make target.  Use for
+# cases whose difference reflects deferred work rather than a real bug.
+define compare_soft
+	@echo ""
+	@echo "=== compare $(1) (soft) ==="
+	@if cmp -s $(OUT)/$(1).iix $(OUT)/$(1).clinker; then \
+	  sz=$$(wc -c < $(OUT)/$(1).iix | tr -d ' '); \
+	  echo "PASS $(1) ($${sz} bytes) — promote to MUST_PASS"; \
+	else \
+	  ref_sz=$$(wc -c < $(OUT)/$(1).iix | tr -d ' '); \
+	  our_sz=$$(wc -c < $(OUT)/$(1).clinker | tr -d ' '); \
+	  echo "DIVERGE $(1): iix=$${ref_sz}B  clink=$${our_sz}B"; \
 	fi
 endef
 
@@ -106,3 +136,40 @@ $(OUT)/minimal.clinker: $(MINIMAL_OBJ)/minimal.a
 
 test-minimal: $(OUT)/minimal.iix $(OUT)/minimal.clinker
 	$(call compare,minimal)
+
+# ─── reloc: self-referential jump forces a RELOC record ─────────────────────
+#
+# `jml lab1` emits a 3-byte intra-segment address, producing either a
+# plain RELOC / cRELOC record or a SUPER RELOC3 subrecord depending on
+# what the linker chooses. Either way, SUPER-unpack code in pass2 is
+# exercised whenever iix link picks the packed form.
+
+RELOC_OBJ := $(OBJ)/reloc
+RELOC_SRC := $(MAKEFILE_DIR)cases/reloc/inputs/reloc.asm
+
+$(RELOC_OBJ)/reloc.a: $(RELOC_SRC)
+	@mkdir -p $(RELOC_OBJ)
+	@cp $(RELOC_SRC) $(RELOC_OBJ)/reloc.asm
+	@iix chtyp -l asm $(RELOC_OBJ)/reloc.asm
+	cd $(RELOC_OBJ) && iix assemble reloc.asm >/dev/null
+	@mv $(RELOC_OBJ)/reloc.ROOT $(RELOC_OBJ)/reloc.a
+	@iix chtyp -t obj $(RELOC_OBJ)/reloc.a
+
+$(OUT)/reloc.iix: $(RELOC_OBJ)/reloc.a
+	@mkdir -p $(OUT)
+	@echo "--- iix link reloc ---"
+	cd $(RELOC_OBJ) && iix link -X reloc keep=$(OUT)/reloc.iix
+
+$(OUT)/reloc.clinker: $(RELOC_OBJ)/reloc.a
+	@mkdir -p $(OUT)
+	@echo "--- clinker reloc ---"
+	cd $(RELOC_OBJ) && iix $(CLINKER) -X reloc keep=$(OUT)/reloc.clinker
+
+test-reloc: $(OUT)/reloc.iix $(OUT)/reloc.clinker
+	$(call compare,reloc)
+
+# Soft comparison: marks current divergence (clinker emits plain RELOC,
+# iix link packs into SUPER RELOC3) as expected until Phase 9 lands
+# SUPER emission on our output side.
+diverge-reloc: $(OUT)/reloc.iix $(OUT)/reloc.clinker
+	$(call compare_soft,reloc)

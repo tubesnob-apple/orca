@@ -234,10 +234,15 @@ seg->loadName[NAME_MAX - 1] = 0;
 OmfReadPString(fp, seg->segName, NAME_MAX);
 }
 
-/* Uppercase (ORCA convention) */
+/* Uppercase SEGNAME only (ORCA convention — segment names are used
+ * as symbol references, which are case-insensitive, so normalizing
+ * up front simplifies hash lookups).  LOADNAME keeps its original
+ * case because iix link preserves load-name case on output, and the
+ * load name determines segment merging — collapsing "cg" and "CG"
+ * (distinct load names in real ORCA/C input) into a single output
+ * segment changes the file layout. */
 {
 char *p;
-for (p = seg->loadName; *p; p++) *p = (char)toupper(*p);
 for (p = seg->segName;  *p; p++) *p = (char)toupper(*p);
 }
 

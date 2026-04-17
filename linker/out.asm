@@ -2591,6 +2591,7 @@ lb3	pl4	loadSeg
 	long	M
 	add4	op,#8		advance op past the prologue
 	la	pc,8		pc = 8: matches pass-1 symbol offsets
+	la	loadPC,8	loadPC must match pc; GetSegment lb3 copies loadPC→pc
 p2p1	inc	loadPass2	loadPass2 = true
 	rts
 	end

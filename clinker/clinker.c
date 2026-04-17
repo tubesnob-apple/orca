@@ -103,7 +103,12 @@ memset(s, 0, sizeof(OutSeg));
 strncpy(s->loadName, loadName, NAME_MAX - 1);
 strncpy(s->segName,  segName,  NAME_MAX - 1);
 s->segType   = (word)(kind & 0x1F);
-s->kind      = kind;
+/* The private bit ($4000) is a linker-stage visibility attribute —
+ * it controls whether object-file segments are visible to other
+ * compile units.  Once merged into a load segment, the result is
+ * the final program's code/data, so iix link clears the bit on
+ * output.  Strip it here to match. */
+s->kind      = (word)(kind & ~0x4000);
 s->banksize  = 0x10000L;
 s->segNum    = ++numOutSegs;
 s->length    = 0;

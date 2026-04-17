@@ -96,22 +96,23 @@ SUBMAKE_ARGS := BIN_DIR=$(BIN_DIR) VERSION=$(VERSION) INSTALL_SH=$(INSTALL_SH) G
 .PHONY: sysfpefloat sysfpefloat-install sysfpefloat-clean
 .PHONY: orca-pascal orca-pascal-install orca-pascal-clean
 .PHONY: orca-c orca-c-install orca-c-clean
+.PHONY: clinker clinker-install clinker-clean
 .PHONY: stamp-version
 
 # ── Default: build everything ─────────────────────────────────────────────────
 
-all: orcalib paslib syslib sysfloat sysfpefloat linker dumpobj makelib orca-pascal orca-c
+all: orcalib paslib syslib sysfloat sysfpefloat linker dumpobj makelib orca-pascal orca-c clinker
 	@echo "Build complete — version $(VERSION)"
 	@echo "Binaries staged in $(BIN_DIR)/"
 
 # ── Install everything ────────────────────────────────────────────────────────
 
-install: orcalib-install paslib-install syslib-install sysfloat-install sysfpefloat-install linker-install dumpobj-install makelib-install orca-pascal-install orca-c-install
+install: orcalib-install paslib-install syslib-install sysfloat-install sysfpefloat-install linker-install dumpobj-install makelib-install orca-pascal-install orca-c-install clinker-install
 	@echo "Install complete — version $(VERSION)"
 
 # ── Clean everything ──────────────────────────────────────────────────────────
 
-clean: orcalib-clean paslib-clean syslib-clean sysfloat-clean sysfpefloat-clean linker-clean dumpobj-clean makelib-clean orca-pascal-clean orca-c-clean
+clean: orcalib-clean paslib-clean syslib-clean sysfloat-clean sysfpefloat-clean linker-clean dumpobj-clean makelib-clean orca-pascal-clean orca-c-clean clinker-clean
 	rm -rf $(BIN_DIR)
 
 # ── Version stamping ──────────────────────────────────────────────────────────
@@ -190,6 +191,17 @@ linker-install:
 
 linker-clean:
 	$(GMAKE) -C $(REPO_ROOT)/linker/goldengate $(SUBMAKE_ARGS) clean
+
+# ── clinker ───────────────────────────────────────────────────────────────────
+
+clinker:
+	$(GMAKE) -C $(REPO_ROOT)/linker/clinker/goldengate $(SUBMAKE_ARGS)
+
+clinker-install:
+	$(GMAKE) -C $(REPO_ROOT)/linker/clinker/goldengate $(SUBMAKE_ARGS) install
+
+clinker-clean:
+	$(GMAKE) -C $(REPO_ROOT)/linker/clinker/goldengate $(SUBMAKE_ARGS) clean
 
 # ── dumpobj ───────────────────────────────────────────────────────────────────
 

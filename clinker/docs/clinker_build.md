@@ -321,14 +321,24 @@ Adjacent correctness fixes that landed along the way:
 
 ## Known gap
 
-Linking a real ORCA/C program (e.g. DumpOBJ) produces ~40% more bytes
-than iix link (71 KB vs 50 KB).  The 3-test suite passes byte-
-identical, so basic RELOC/INTERSEG/SUPER handling is correct; the size
-difference looks like library-side over-inclusion — we pull more
-segments than iix does.  Worth investigating: is iix pruning segments
-whose symbols are only weakly referenced from other pulled segments?
-Are we propagating symbol requests through segments we pulled as
-transitive dependencies?  Diagnosis pending.
+Real ORCA/C programs now link with **the exact same library-segment
+set as iix link** and without over-inclusion.  The critical missing
+piece was recognising OP_USING ($E4) and OP_STRONG ($E5) body records
+as SymRequest triggers — without that, private library segments like
+SysLib's `~GSOSIO` (whose name appears only in USING records) were
+never pulled via the dict path and our legacy body-scan fallback
+over-compensated.
+
+With USING/STRONG processing and per-file scoped private dict lookup:
+
+  dumpobj against ORCALib/SysFloat/SysLib
+    iix link      : 53574 bytes, 89 library segments
+    clinker       : 51634 bytes, 89 library segments   (same 89)
+    0 undefined-symbol errors, 0 library pulls that iix doesn't
+
+The remaining ~2 KB delta (clinker is *smaller* than iix) is
+encoding-level — tighter SUPER packing and compact-reloc emission on
+our side.  Not over-inclusion.
 
 ---
 

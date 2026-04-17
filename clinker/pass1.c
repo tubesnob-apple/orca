@@ -213,8 +213,19 @@ for (;;) {
         fseek(fp, (long)len, SEEK_CUR);
         }
     else if (op == OP_STRONG || op == OP_USING) {
-        int nlen = fgetc(fp);
-        if (nlen != EOF) fseek(fp, nlen, SEEK_CUR);
+        /* STRONG ($E5) forces the linker to resolve the named symbol
+         * "as if a STRONG reference had been encountered."  USING
+         * ($E4) names a data segment that this segment addresses —
+         * the referenced segment must be included in the link for
+         * direct-page addresses to resolve.  Both are pull triggers
+         * (this is how iix pulls library private segments like
+         * ~GSOSIO, whose segment name appears only in USING records
+         * inside other pulled library segments). */
+        char name[NAME_MAX];
+        char *p;
+        OmfReadPString(fp, name, NAME_MAX);
+        for (p = name; *p; p++) *p = (char)toupper(*p);
+        SymRequest(name, 1);
         }
     else if (op == OP_MEM) {
         /* MEM: two 4-byte numbers */
@@ -600,8 +611,10 @@ do {
 
     for (before = inputFiles; before; before = before->next) beforeCount++;
     changed = FALSE;
-    for (lf = libFiles; lf; lf = lf->next)
+    for (lf = libFiles; lf; lf = lf->next) {
+        if (lf->dictValid) continue;     /* dict covers these */
         LibrarySearchLegacy(lf, &libFileSeq);
+        }
     afterCount = 0;
     for (p = inputFiles; p; p = p->next) afterCount++;
     if (afterCount > beforeCount) changed = TRUE;

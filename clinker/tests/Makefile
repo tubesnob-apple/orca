@@ -43,9 +43,9 @@ OUT := $(MAKEFILE_DIR)out
 #               where iix link packs into SUPER).  Run and reported, but do
 #               not fail `make all`.  Each should migrate to MUST_PASS as the
 #               corresponding roadmap phase lands.
-TESTS       := minimal reloc interseg
+TESTS       := minimal reloc interseg dumpobj
 MUST_PASS   := minimal reloc interseg
-DIVERGE     :=
+DIVERGE     := dumpobj
 
 .PHONY: all clean help $(TESTS:%=test-%) $(DIVERGE:%=diverge-%)
 .DEFAULT_GOAL := all
@@ -203,3 +203,39 @@ $(OUT)/interseg.clinker: $(INTERSEG_OBJ)/interseg.ROOT
 
 test-interseg: $(OUT)/interseg.iix $(OUT)/interseg.clinker
 	$(call compare,interseg)
+
+# ─── dumpobj: a real ORCA/C program against the standard libraries ──────────
+#
+# Uses the already-compiled DumpOBJ.a under dumpobj/obj/ (built by
+# `make -C goldengate dumpobj`).  Both linkers see the same three
+# libraries explicitly so the input set is identical.  Currently a
+# DIVERGE case: clinker pulls more library segments than iix link
+# does, producing roughly 40 % more bytes.  The test file is still
+# loadable and runs — this is an over-inclusion in library search,
+# not a correctness gap.
+
+DUMPOBJ_A     := $(REPO_ROOT)/dumpobj/obj/DumpOBJ
+DUMPOBJ_LIBS  := lib=/Library/GoldenGate/Libraries/ORCALib \
+                 lib=/Library/GoldenGate/Libraries/SysFloat \
+                 lib=/Library/GoldenGate/Libraries/SysLib
+
+# iix link treats `lib=` as a filename on this host (its implicit
+# library path is what actually finds ORCALib/SysFloat/SysLib), so
+# the reference invocation doesn't specify libs explicitly.  Our
+# clinker still needs explicit lib= args because it has no implicit
+# search path.  The two invocations therefore see slightly different
+# library sets in principle — good enough for tracking the byte delta
+# over time while we close the over-inclusion gap.
+
+$(OUT)/dumpobj.iix: $(DUMPOBJ_A).a
+	@mkdir -p $(OUT)
+	@echo "--- iix link dumpobj ---"
+	cd $(REPO_ROOT)/dumpobj/obj && iix link -X -o $(OUT)/dumpobj.iix DumpOBJ >/dev/null
+
+$(OUT)/dumpobj.clinker: $(DUMPOBJ_A).a
+	@mkdir -p $(OUT)
+	@echo "--- clinker dumpobj ---"
+	iix $(CLINKER) -X -o $(OUT)/dumpobj.clinker $(DUMPOBJ_A) $(DUMPOBJ_LIBS) >/dev/null 2>&1
+
+diverge-dumpobj: $(OUT)/dumpobj.iix $(OUT)/dumpobj.clinker
+	$(call compare_soft,dumpobj)

@@ -71,12 +71,17 @@ else if (type <= 0x0D)   { s.patchLen = 3; s.isInterseg = 1;
                            s.valid    = 1; }
 else if (type <= 0x19)   { s.patchLen = 2; s.isInterseg = 1;
                            s.fileNum  = 1;
-                           s.fixedSeg = type - 13;
+                           /* type encodes POST-ExpressLoad segnum
+                            * (`segment = type - 12` per loader spec).
+                            * Convert to clinker's pre-remap segNum. */
+                           s.fixedSeg = (type - 12)
+                                        - (opt_express ? 1 : 0);
                            s.valid    = 1; }
 else if (type <= 0x25)   { s.patchLen = 2; s.isInterseg = 1;
                            s.shift    = 0xF0;   /* right-shift 16, bank byte */
                            s.fileNum  = 1;
-                           s.fixedSeg = type - 25;
+                           s.fixedSeg = (type - 24)
+                                        - (opt_express ? 1 : 0);
                            s.valid    = 1; }
 
 return s;
@@ -122,8 +127,9 @@ if (s->fixedSeg > 0) {
     tgtSeg = s->fixedSeg;
     }
 else {
-    /* INTERSEG1..12: segment # is in the third byte of the patch */
-    tgtSeg = (int)out->data[absPatch + 2];
+    /* INTERSEG1..12: POST-ExpressLoad segnum is in the third byte of
+     * the patch. Convert to pre-remap for RelocRec. */
+    tgtSeg = (int)out->data[absPatch + 2] - (opt_express ? 1 : 0);
     /* Value is the 16-bit offset (low bytes); drop the segment byte */
     value &= 0xFFFFL;
     }

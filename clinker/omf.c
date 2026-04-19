@@ -390,6 +390,12 @@ else
 
 void OmfWriteReloc(FILE *fp, const RelocRec *r)
 {
+/* GS/OS loader expects POST-ExpressLoad segment numbers in every
+ * relocation record's segNum field. Clinker's internal r->segNum is
+ * pre-remap (1..N over data segments); convert to post-remap by
+ * adding 1 for the ExpressLoad segment prepended at output time. */
+int outSeg = r->segNum + (opt_express ? 1 : 0);
+
 if (r->type == 0) {
     if (FitsCReloc(r)) {
         /* cRELOC: opcode(1) pLen(1) shift(1) pc16(2) value16(2) */
@@ -415,7 +421,7 @@ else {
         OmfWriteByte(fp, r->patchLen);
         OmfWriteByte(fp, r->shift);
         OmfWriteWord(fp, (int)r->pc);
-        OmfWriteByte(fp, (int)r->segNum);
+        OmfWriteByte(fp, outSeg);
         OmfWriteWord(fp, (int)r->value);
         }
     else {
@@ -425,7 +431,7 @@ else {
         OmfWriteByte (fp, r->shift);
         OmfWriteDword(fp, r->pc);
         OmfWriteWord (fp, r->fileNum);
-        OmfWriteWord (fp, r->segNum);
+        OmfWriteWord (fp, outSeg);
         OmfWriteDword(fp, r->value);
         }
     }
@@ -466,12 +472,16 @@ else {
 
 /* ClassifyRelocForSuper — best SUPER subtype for r, or -1 if unpackable.
  *
- * Stock iix link encodes subtype = internal-segNum + 13 (where internal
- * segNum is pre-ExpressLoad, 1..N); the GS/OS loader decodes via
- * segment = type - 12, which (because ExpressLoad prepends as SEGNUM 1)
- * correctly resolves to the post-remap segment number. Mirror that. */
+ * GS/OS loader decodes SUPER_INTERSEG13..36 subtype via
+ * `segment = type - 12` and treats `segment` as the POST-ExpressLoad
+ * SEGNUM in the output file. Clinker's internal r->segNum is pre-remap
+ * (1..N over data segments) so we bump by 1 when opt_express prepends
+ * an ExpressLoad. Without this bump every subtype comes out one less
+ * than stock's and the loader patches with the wrong segment base. */
 static int ClassifyRelocForSuper(const RelocRec *r)
 {
+int outSeg;
+
 if (r->pc < 0) return -1;
 
 if (r->type == 0) {
@@ -481,6 +491,7 @@ if (r->type == 0) {
     }
 
 /* r->type == 1 (INTERSEG) */
+outSeg = r->segNum + (opt_express ? 1 : 0);
 
 if (r->patchLen == 3 && r->shift == 0 &&
     r->fileNum >= 1 && r->fileNum <= 12) {
@@ -488,9 +499,9 @@ if (r->patchLen == 3 && r->shift == 0 &&
     }
 
 if (r->patchLen == 2 && r->fileNum == 1 &&
-    r->segNum >= 1 && r->segNum <= 12) {
-    if (r->shift == 0)    return r->segNum + 13;        /* INTERSEG13..24 */
-    if (r->shift == 0xF0) return r->segNum + 25;        /* INTERSEG25..36 */
+    outSeg >= 1 && outSeg <= 12) {
+    if (r->shift == 0)    return outSeg + 13;           /* INTERSEG13..24 */
+    if (r->shift == 0xF0) return outSeg + 25;           /* INTERSEG25..36 */
     }
 
 return -1;
@@ -637,11 +648,11 @@ for (r = seg->relocHead; r; r = r->next) {
 
     if (subtype >= 2 && subtype <= 13) {
         /* INTERSEG1..12 (3-byte): 16-bit offset in bytes 0-1,
-         * target segment number in byte 2 (same pre-remap convention
-         * as the subtype encoding — loader translates via remap). */
+         * POST-ExpressLoad target segment number in byte 2. */
+        int outSeg = r->segNum + (opt_express ? 1 : 0);
         seg->data[r->pc + 0] = (byte)(r->value);
         seg->data[r->pc + 1] = (byte)(r->value >> 8);
-        seg->data[r->pc + 2] = (byte)(r->segNum);
+        seg->data[r->pc + 2] = (byte)outSeg;
         }
     else {
         /* RELOC2 (2b), RELOC3 (3b), INTERSEG13..36 (2b): pure value. */

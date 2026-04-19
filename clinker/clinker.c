@@ -91,8 +91,19 @@ OutSeg *s;
  * entire load segment" — so we match on loadName alone, keep the
  * first-seen KIND, and do not require segType equality. */
 for (s = outSegs; s; s = s->next) {
-    if (strcmp(s->loadName, loadName) == 0)
+    if (strcmp(s->loadName, loadName) == 0) {
+        /* Merge this segment's KIND flag bits into the output per the
+         * stock ORCA/M linker rule (linker/out.asm:252-310, CheckHeader):
+         *   bits $1D00 are ORed  — set if ANY contributing seg has them
+         *   bits $E200 are ANDed — set only if ALL contributing segs do
+         * The AND on $E200 is why PRIVATE ($4000) and DYNAMIC ($8000)
+         * clear on output whenever any merged input lacked the bit.
+         * Low byte (segType) stays as first-seen. */
+        word orBits  = (word)(kind & 0x1D00);
+        word andMask = (word)((kind & 0xE200) | 0x1DFF);
+        s->kind = (word)((s->kind | orBits) & andMask);
         return s;
+        }
     }
 
 /* Create a new output segment */
@@ -103,12 +114,10 @@ memset(s, 0, sizeof(OutSeg));
 strncpy(s->loadName, loadName, NAME_MAX - 1);
 strncpy(s->segName,  segName,  NAME_MAX - 1);
 s->segType   = (word)(kind & 0x1F);
-/* The private bit ($4000) is a linker-stage visibility attribute —
- * it controls whether object-file segments are visible to other
- * compile units.  Once merged into a load segment, the result is
- * the final program's code/data, so iix link clears the bit on
- * output.  Strip it here to match. */
-s->kind      = (word)(kind & ~0x4000);
+/* First contributor's KIND is taken verbatim, less the $0100 bankOrg
+ * bit (stock CheckHeader at linker/out.asm:262 does `AND #$FEFF`).
+ * Subsequent merges refine this per the OR/AND masks above. */
+s->kind      = (word)(kind & ~0x0100);
 s->banksize  = 0x10000L;
 s->segNum    = ++numOutSegs;
 s->length    = 0;
@@ -217,7 +226,7 @@ if (sign == '+') {
     }
 }
 
-static void SetBaseName(void)
+void SetBaseName(void)
 {
 /* Extract the last path component, strip extension */
 char *slash, *dot;
@@ -237,11 +246,166 @@ for (i = 0; baseName[i]; i++)
     baseName[i] = (char)toupper((int)baseName[i]);
 }
 
+/* Open an input file (or stem with sibling-family ROOT/.a/.B search)
+ * and append to the inputFiles list. Returns TRUE on success. */
+int fileSeqCounter = 0;
+
+BOOLEAN AddInputFile(const char *arg)
+{
+InputFile *tail;
+int  noExt;
+char tryName[PATH_MAX];
+int  added = 0;
+static const char *exts[] = { ".ROOT", ".root",
+                              ".a",    ".A",
+                              ".B",    ".b",
+                              NULL };
+static const int   groupEnd[] = { 2, 4, 6 };  /* first ext per group */
+
+if (!arg || !arg[0]) return FALSE;
+
+/* Find current tail */
+tail = inputTail;
+
+noExt = !strchr(arg, '.');
+
+if (noExt) {
+    int g, i;
+    FILE *rawFp;
+
+    /* Direct-file path: if arg names an existing file as-is (e.g. a
+     * positional library like /Library/GoldenGate/Libraries/SysFloat,
+     * or an extension-less object), peek OMF KIND at offset 20 and
+     * route accordingly — $08 → library, else regular input. Skips
+     * the sibling-family expansion entirely when the raw path hits. */
+    rawFp = fopen(arg, "rb");
+    if (rawFp) {
+        int k0, k1, kind;
+        fseek(rawFp, 20L, SEEK_SET);
+        k0 = fgetc(rawFp);
+        k1 = fgetc(rawFp);
+        kind = (k0 != EOF && k1 != EOF) ? (k0 | (k1 << 8)) : 0;
+        fseek(rawFp, 0L, SEEK_SET);
+
+        if ((kind & 0x1F) == 0x08) {
+            fclose(rawFp);
+            return AddLibFile(arg);
+            }
+        {
+        InputFile *inf = (InputFile *)malloc(sizeof(InputFile));
+        if (!inf) FatalError("out of memory (InputFile)");
+        memset(inf, 0, sizeof(InputFile));
+        inf->fp      = rawFp;
+        inf->fileNum = ++fileSeqCounter;
+        strncpy(inf->name, arg, PATH_MAX - 1);
+        if (!inputFiles) inputFiles = inf;
+        else             tail->next = inf;
+        inputTail = inf;
+        return TRUE;
+        }
+        }
+
+    /* Try each sibling family (ROOT → .a/.A → .B), adding
+     * the first match in each family. */
+    for (g = 0; g < (int)(sizeof groupEnd / sizeof groupEnd[0]); g++) {
+        int start = (g == 0) ? 0 : groupEnd[g - 1];
+        int stop  = groupEnd[g];
+        FILE *fp = NULL;
+        for (i = start; i < stop && !fp; i++) {
+            snprintf(tryName, sizeof(tryName), "%s%s", arg, exts[i]);
+            fp = fopen(tryName, "rb");
+            }
+        if (fp) {
+            InputFile *inf = (InputFile *)malloc(sizeof(InputFile));
+            if (!inf) FatalError("out of memory (InputFile)");
+            memset(inf, 0, sizeof(InputFile));
+            inf->fp      = fp;
+            inf->fileNum = ++fileSeqCounter;
+            strncpy(inf->name, tryName, PATH_MAX - 1);
+            if (!inputFiles) inputFiles = inf;
+            else             tail->next = inf;
+            tail      = inf;
+            inputTail = inf;
+            added++;
+            }
+        }
+
+    if (added == 0) {
+        fprintf(stderr,
+                "clinker: cannot open: %s(.ROOT|.a|.A|.B)\n", arg);
+        numErrors++;
+        return FALSE;
+        }
+    return TRUE;
+    }
+else {
+    /* Explicit extension: open exactly what was specified. Fallback
+     * for iix's compound-extension stripping — when iix hands us
+     * `foo.root` because it stripped `.a` from `foo.root.a`, try
+     * appending `.a`/`.A` before reporting failure. */
+    InputFile *inf = (InputFile *)malloc(sizeof(InputFile));
+    if (!inf) FatalError("out of memory (InputFile)");
+    memset(inf, 0, sizeof(InputFile));
+    inf->fp = fopen(arg, "rb");
+    strncpy(inf->name, arg, PATH_MAX - 1);
+    if (!inf->fp) {
+        size_t alen = strlen(arg);
+        int    alreadyDotA = (alen >= 2 && arg[alen-2] == '.' &&
+                              (arg[alen-1] == 'a' || arg[alen-1] == 'A'));
+        if (!alreadyDotA) {
+            snprintf(tryName, sizeof(tryName), "%s.a", arg);
+            inf->fp = fopen(tryName, "rb");
+            if (!inf->fp) {
+                snprintf(tryName, sizeof(tryName), "%s.A", arg);
+                inf->fp = fopen(tryName, "rb");
+                }
+            if (inf->fp)
+                strncpy(inf->name, tryName, PATH_MAX - 1);
+            }
+        }
+    if (!inf->fp) {
+        fprintf(stderr, "clinker: cannot open: %s\n", arg);
+        free(inf);
+        numErrors++;
+        return FALSE;
+        }
+    inf->fileNum = ++fileSeqCounter;
+    if (!inputFiles) inputFiles = inf;
+    else             tail->next = inf;
+    tail      = inf;
+    inputTail = inf;
+    return TRUE;
+    }
+}
+
+/* Add a library file by path (lib=<path> semantics). Returns TRUE on
+ * success. Silently skips (not error) if the file is not a valid lib
+ * per `isLib == 0`; opens unconditionally otherwise. */
+BOOLEAN AddLibFile(const char *path)
+{
+LibFile *lf;
+
+if (!path || !path[0]) return FALSE;
+
+lf = (LibFile *)malloc(sizeof(LibFile));
+if (!lf) FatalError("out of memory (LibFile)");
+memset(lf, 0, sizeof(LibFile));
+strncpy(lf->path, path, PATH_MAX - 1);
+lf->fp = fopen(lf->path, "rb");
+if (!lf->fp) {
+    fprintf(stderr, "clinker: cannot open library: %s\n", lf->path);
+    free(lf);
+    numErrors++;
+    return FALSE;
+    }
+lf->next = libFiles;
+libFiles = lf;
+return TRUE;
+}
+
 static int GetParms(int argc, char *argv[])
 {
 int i;
-InputFile *tail = NULL;
-static int fileSeq = 0;
 
 for (i = 1; i <= argc; i++) {
     char *arg = argv[i];
@@ -268,99 +432,10 @@ for (i = 1; i <= argc; i++) {
     else if ((toupper((int)arg[0]) == 'L') &&
              (toupper((int)arg[1]) == 'I') &&
              (toupper((int)arg[2]) == 'B') && arg[3] == '=') {
-        /* lib=<path>: add library file for symbol extraction */
-        LibFile *lf = (LibFile *)malloc(sizeof(LibFile));
-        if (!lf) FatalError("out of memory (LibFile)");
-        memset(lf, 0, sizeof(LibFile));
-        strncpy(lf->path, arg + 4, PATH_MAX - 1);
-        lf->fp = fopen(lf->path, "rb");
-        if (!lf->fp) {
-            fprintf(stderr, "clinker: cannot open library: %s\n", lf->path);
-            free(lf);
-            numErrors++;
-            } else {
-            lf->next = libFiles;
-            libFiles = lf;
-            }
+        AddLibFile(arg + 4);
         }
     else {
-        /* Input file.
-         *
-         * When the argument has no extension, the ORCA convention is
-         * that three OMF files may share the stem:
-         *     <name>.ROOT   — root/data segments (Pascal compile output)
-         *     <name>.a      — code segments (Pascal compile output)
-         *     <name>.B      — segments assembled from a companion .asm
-         *                     file that the Pascal compiler auto-
-         *                     assembles alongside .pas compilation
-         *                     (e.g. ObjOut.asm contributes CnOut/Out/
-         *                     COut segments to obj/objout.B)
-         * We open them in that order so the link iteration processes
-         * root segments before code, matching iix link's behaviour.
-         *
-         * If the argument has an explicit extension, open it literally
-         * and don't try any siblings. */
-        int  noExt = !strchr(arg, '.');
-        char tryName[PATH_MAX];
-        int  added = 0;
-        static const char *exts[] = { ".ROOT", ".root",
-                                      ".a",    ".A",
-                                      ".B",    ".b",
-                                      NULL };
-        static const int   groupEnd[] = { 2, 4, 6 };  /* first ext per group */
-
-        if (noExt) {
-            int g, i;
-            /* Try each sibling family (ROOT → .a/.A → .B), adding
-             * the first match in each family. */
-            for (g = 0; g < (int)(sizeof groupEnd / sizeof groupEnd[0]); g++) {
-                int start = (g == 0) ? 0 : groupEnd[g - 1];
-                int stop  = groupEnd[g];
-                FILE *fp = NULL;
-                for (i = start; i < stop && !fp; i++) {
-                    snprintf(tryName, sizeof(tryName), "%s%s", arg, exts[i]);
-                    fp = fopen(tryName, "rb");
-                    }
-                if (fp) {
-                    InputFile *inf = (InputFile *)malloc(sizeof(InputFile));
-                    if (!inf) FatalError("out of memory (InputFile)");
-                    memset(inf, 0, sizeof(InputFile));
-                    inf->fp      = fp;
-                    inf->fileNum = ++fileSeq;
-                    strncpy(inf->name, tryName, PATH_MAX - 1);
-                    if (!inputFiles) inputFiles = inf;
-                    else             tail->next = inf;
-                    tail      = inf;
-                    inputTail = inf;
-                    added++;
-                    }
-                }
-
-            if (added == 0) {
-                fprintf(stderr,
-                        "clinker: cannot open: %s(.ROOT|.a|.A|.B)\n", arg);
-                numErrors++;
-                }
-            }
-        else {
-            /* Explicit extension: open exactly what was specified */
-            InputFile *inf = (InputFile *)malloc(sizeof(InputFile));
-            if (!inf) FatalError("out of memory (InputFile)");
-            memset(inf, 0, sizeof(InputFile));
-            inf->fp = fopen(arg, "rb");
-            if (!inf->fp) {
-                fprintf(stderr, "clinker: cannot open: %s\n", arg);
-                free(inf);
-                numErrors++;
-                continue;
-                }
-            strncpy(inf->name, arg, PATH_MAX - 1);
-            inf->fileNum = ++fileSeq;
-            if (!inputFiles) inputFiles = inf;
-            else             tail->next = inf;
-            tail      = inf;
-            inputTail = inf;
-            }
+        AddInputFile(arg);
         }
     }
 return (numErrors == 0);
@@ -373,15 +448,27 @@ return (numErrors == 0);
 int main(int argc, char *argv[])
 {
 int ok;
+BOOLEAN fromShell;
 
-/* Parse command line */
-if (!GetParms(argc, argv)) {
-    fprintf(stderr, "clinker: aborting due to errors\n");
-    return 1;
+/* Allocate the symbol-table hash array on the heap to keep ~_ROOT
+ * (the data bank) under 64KB. */
+SymInit();
+
+/* Try the iix-link path first: if the shell has LangInfo queued
+ * (our symlink at /Library/GoldenGate/Languages/Linker → clinker
+ * is being invoked as `iix link`), consume it. Otherwise fall
+ * through to standard argv parsing for direct `iix clinker` use. */
+fromShell = LoadFromLInfo();
+if (!fromShell) {
+    if (!GetParms(argc, argv)) {
+        fprintf(stderr, "clinker: aborting due to errors\n");
+        return 1;
+        }
     }
 
 if (!inputFiles) {
     fprintf(stderr, "clinker: no input files\n");
+    if (fromShell) ReportToShell();
     return 1;
     }
 

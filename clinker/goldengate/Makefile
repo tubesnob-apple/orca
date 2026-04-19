@@ -36,11 +36,13 @@ $(error GoldenGate root not found. Set $$GOLDEN_GATE or $$ORCA_ROOT.)
 endif
 
 UTILITIES_DIR := $(GG_ROOT)/Utilities
+LANGUAGES_DIR := $(GG_ROOT)/Languages
+CLINKER_PATH  := $(LANGUAGES_DIR)/clinker
 
 BIN_OUT := $(BIN_DIR)/clinker
 
 # -- Source modules -----------------------------------------------------------
-C_MODULES := clinker symbol omf pass1 pass2 expr out gsplus libdict
+C_MODULES := clinker symbol omf pass1 pass2 expr out gsplus libdict linfo
 
 C_OBJS := $(foreach m,$(C_MODULES),$(OBJ_DIR)/$(m).a)
 
@@ -73,11 +75,12 @@ $(BIN_OUT): $(C_OBJS) | $(BIN_DIR)
 	iix chtyp -t exe -a 0xDB01 $(BIN_OUT)
 
 # -- Install ------------------------------------------------------------------
-# clinker is invoked as `iix clinker ...` (not `iix link ...`).
-# Install it to Languages/ alongside Linker.
+# Install clinker alongside the stock ORCA/M Linker in Languages/.
+# `iix link` continues to resolve to the stock Linker; clinker is a
+# parallel binary at Languages/clinker.
 install: all
-	@echo "--- install clinker -> $(UTILITIES_DIR)/clinker ---"
-	$(INSTALL_SH) $(BIN_OUT) $(UTILITIES_DIR)/clinker $(GG_ROOT)
+	@echo "--- install clinker -> $(CLINKER_PATH) ---"
+	$(INSTALL_SH) $(BIN_OUT) $(CLINKER_PATH) $(GG_ROOT)
 
 # -- Clean --------------------------------------------------------------------
 clean:

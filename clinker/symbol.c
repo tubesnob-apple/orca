@@ -12,7 +12,20 @@
 
 #include "clinker.h"
 
-Symbol *symHash[SYM_HASH_SIZE];
+Symbol **symHash = NULL;
+
+/* Allocate and zero the hash table. Called once from main before
+ * any symbol-table operation. Moving this ~4KB allocation out of
+ * ~_ROOT and onto the heap keeps the data bank under 64KB. */
+void SymInit(void)
+{
+int i;
+if (symHash) return;
+symHash = (Symbol **)malloc(SYM_HASH_SIZE * sizeof(Symbol *));
+if (!symHash) FatalError("out of memory (symHash)");
+for (i = 0; i < SYM_HASH_SIZE; i++)
+    symHash[i] = NULL;
+}
 
 /* Set by pass1's library-search path while processing a lib segment, so
  * SymRequest can tag new requests with their originating library and

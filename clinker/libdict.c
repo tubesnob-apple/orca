@@ -151,9 +151,26 @@ return ok;
 void LibDictInit(LibFile *lf)
 {
 long segOff = 0;
+int  version;
 
 if (!lf || lf->dictLoaded) return;
 lf->dictLoaded = TRUE;
+
+/* Z.EndP and other legacy OMF v1 libraries aren't our format — if
+ * the version byte at offset 15 isn't 2, treat the file as
+ * "no dictionary" rather than letting OmfReadHeader fail the link.
+ * OMF v2 header layout: BYTECNT(4) RESSPC(4) LENGTH(4) unused(1)
+ * LABLEN(1) NUMLEN(1) VERSION(1). */
+fseek(lf->fp, 15L, SEEK_SET);
+version = fgetc(lf->fp);
+fseek(lf->fp, 0L, SEEK_SET);
+if (version != 2) {
+    lf->skipLegacy = TRUE;
+    if (opt_progress)
+        printf("libdict: %s — no dictionary (OMF v%d), 0 symbols\n",
+               lf->path, version);
+    return;
+    }
 
 for (;;) {
     InSeg seg;
@@ -180,24 +197,26 @@ if (opt_progress)
            lf->numSyms);
 }
 
-/* LibDictFind — binary search for `name` (already uppercase) in lf's
- * parsed dictionary.  Returns the file offset of the defining
- * segment's header, or -1 if the library has no dictionary or the
- * symbol isn't present. */
-/* Binary-search lookup returning the entry index, or -1 on miss. */
-static int FindIndex(LibFile *lf, const char *name)
+/* Binary-search for the LEFTMOST entry matching `name` — important
+ * because MakeLib emits one dict entry per (file, symbol) pair, so
+ * compiler-generated private names like `~0001buf` often appear
+ * multiple times (once per source .a that happens to mint the same
+ * anonymous name). Callers walk forward from the returned index to
+ * find the one whose file/private attributes match the request. */
+static int FindLeftmost(LibFile *lf, const char *name)
 {
 int lo = 0;
 int hi = lf->numSyms - 1;
+int found = -1;
 
 while (lo <= hi) {
     int mid = (lo + hi) >> 1;
     int cmp = strcmp(lf->syms[mid].name, name);
-    if (cmp == 0) return mid;
-    if (cmp < 0)  lo = mid + 1;
-    else          hi = mid - 1;
+    if (cmp == 0) { found = mid; hi = mid - 1; }
+    else if (cmp < 0)  lo = mid + 1;
+    else               hi = mid - 1;
     }
-return -1;
+return found;
 }
 
 long LibDictFind(LibFile *lf, const char *name)
@@ -208,10 +227,14 @@ if (!lf) return -1;
 if (!lf->dictLoaded) LibDictInit(lf);
 if (!lf->dictValid)  return -1;
 
-idx = FindIndex(lf, name);
-if (idx < 0)                  return -1;
-if (lf->syms[idx].isPrivate)  return -1;   /* public-only */
-return lf->syms[idx].segOffset;
+/* Public-only lookup: walk duplicates, return the first public one. */
+idx = FindLeftmost(lf, name);
+if (idx < 0) return -1;
+while (idx < lf->numSyms && strcmp(lf->syms[idx].name, name) == 0) {
+    if (!lf->syms[idx].isPrivate) return lf->syms[idx].segOffset;
+    idx++;
+    }
+return -1;
 }
 
 const LibSymEntry *LibDictLookup(LibFile *lf, const char *name)
@@ -222,7 +245,23 @@ if (!lf) return NULL;
 if (!lf->dictLoaded) LibDictInit(lf);
 if (!lf->dictValid)  return NULL;
 
-idx = FindIndex(lf, name);
+/* Returns the leftmost match. Caller uses LibDictNext to iterate
+ * through any duplicates when evaluating private-entry file-scope. */
+idx = FindLeftmost(lf, name);
 if (idx < 0) return NULL;
 return &lf->syms[idx];
+}
+
+/* Iterate duplicates. Pass the entry returned by LibDictLookup (or a
+ * previous LibDictNext) and get the next same-name entry, or NULL when
+ * the run ends. */
+const LibSymEntry *LibDictNext(LibFile *lf, const LibSymEntry *cur)
+{
+int idx;
+
+if (!lf || !cur) return NULL;
+idx = (int)(cur - lf->syms);
+if (idx < 0 || idx >= lf->numSyms - 1) return NULL;
+if (strcmp(lf->syms[idx + 1].name, cur->name) != 0) return NULL;
+return &lf->syms[idx + 1];
 }

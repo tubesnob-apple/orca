@@ -592,22 +592,28 @@ do {
 
             for (lf = libFiles; lf; lf = lf->next) {
                 const LibSymEntry *e;
+                BOOLEAN pulled = FALSE;
                 if (!lf->dictValid) continue;  /* legacy path covers these */
-                e = LibDictLookup(lf, sym->name);
-                if (!e) continue;
-
-                /* Public dict entries always match.  Private entries
-                 * match only when the request came from within the
-                 * SAME MakeLib-internal file as the entry (iix's
-                 * per-file scoping rule). */
-                if (e->isPrivate) {
-                    if (sym->reqLib != lf)              continue;
-                    if (sym->reqFileNum != e->fileNum)  continue;
+                /* Walk every same-name dict entry — duplicates exist for
+                 * compiler-mangled private names like `~0001buf` (one
+                 * per source file in the library). Picking only the
+                 * leftmost match would miss the correct file-scoped
+                 * entry for other requesters. */
+                for (e = LibDictLookup(lf, sym->name); e; e = LibDictNext(lf, e)) {
+                    /* Public dict entries always match. Private entries
+                     * match only when the request came from within the
+                     * SAME MakeLib-internal file as the entry (iix's
+                     * per-file scoping rule). */
+                    if (e->isPrivate) {
+                        if (sym->reqLib != lf)              continue;
+                        if (sym->reqFileNum != e->fileNum)  continue;
+                        }
+                    PullLibSegment(lf, e->segOffset, e->fileNum, &libFileSeq);
+                    changed = TRUE;
+                    pulled = TRUE;
+                    break;
                     }
-
-                PullLibSegment(lf, e->segOffset, e->fileNum, &libFileSeq);
-                changed = TRUE;
-                break;    /* first library wins */
+                if (pulled) break;    /* first library wins */
                 }
             }
         }
@@ -641,6 +647,7 @@ do {
     changed = FALSE;
     for (lf = libFiles; lf; lf = lf->next) {
         if (lf->dictValid) continue;     /* dict covers these */
+        if (lf->skipLegacy) continue;    /* legacy OMF v1 — skip */
         LibrarySearchLegacy(lf, &libFileSeq);
         }
     afterCount = 0;

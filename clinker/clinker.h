@@ -21,9 +21,17 @@
 /* Basic types                                                */
 /* ---------------------------------------------------------- */
 
-typedef int   BOOLEAN;
+/* Match ORCACDefs/types.h so clinker.c can pull in <shell.h> (which
+ * transitively includes types.h) without a duplicate-typedef conflict. */
+#ifndef __TYPES__
+typedef unsigned int BOOLEAN;
+#endif
+#ifndef TRUE
 #define TRUE  1
+#endif
+#ifndef FALSE
 #define FALSE 0
+#endif
 
 typedef unsigned char  byte;
 typedef unsigned short word;
@@ -245,6 +253,7 @@ typedef struct LibFile {
     int             numSyms;
     BOOLEAN         dictLoaded;
     BOOLEAN         dictValid;
+    BOOLEAN         skipLegacy;  /* not OMF v2 — can't scan segment-by-segment */
 
     struct LibFile *next;
 } LibFile;
@@ -256,7 +265,8 @@ extern InputFile *inputTail;    /* last entry in inputFiles */
 extern LibFile   *libFiles;     /* library files for symbol extraction */
 extern OutSeg    *outSegs;      /* linked list of output segments */
 extern int        numOutSegs;
-extern Symbol    *symHash[SYM_HASH_SIZE];
+extern Symbol   **symHash;      /* allocated by SymInit() */
+void SymInit(void);
 
 /* GSplus signature */
 extern dword     sfSig;         /* 32-bit link signature */
@@ -297,12 +307,25 @@ long MeasureBody(FILE *fp, InSeg *seg);
 void LibrarySearch(void);
 
 /* libdict.c — library dictionary cache + lookup */
+/* Input-file helpers (defined in clinker.c, called from linfo.c) */
+BOOLEAN AddInputFile(const char *arg);
+BOOLEAN AddLibFile(const char *path);
+void    SetBaseName(void);
+
+/* iix-link LangInfo path (defined in linfo.c, called from clinker.c) */
+BOOLEAN LoadFromLInfo(void);
+void    ReportToShell(void);
+
 void LibDictInit(LibFile *lf);
 /* LibDictFind: public-only name lookup (private dict entries are rejected). */
 long LibDictFind(LibFile *lf, const char *name);  /* -1 on miss */
-/* LibDictLookup: richer lookup — returns the matching entry (or NULL on miss).
- * Caller checks isPrivate / fileNum to decide whether the symbol is usable. */
+/* LibDictLookup: richer lookup — returns the LEFTMOST matching entry
+ * (or NULL on miss). Caller checks isPrivate / fileNum, and iterates
+ * same-name duplicates via LibDictNext. Duplicates occur because
+ * MakeLib emits one dict entry per (file, symbol) pair, and compiler-
+ * generated private names like `~0001buf` recur across source files. */
 const LibSymEntry *LibDictLookup(LibFile *lf, const char *name);
+const LibSymEntry *LibDictNext(LibFile *lf, const LibSymEntry *cur);
 
 /* Set by pass1 while it processes a library-sourced segment.  SymRequest
  * reads these to tag new symbol requests with their originating library

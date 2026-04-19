@@ -411,6 +411,12 @@ for (;;) {
         }
     }
 
+/* RESSPC zero-fill: inline at end of each input seg so the merged
+ * output contains the full memory image. Matches pass1's measured
+ * += resspc bump, which sized the output buffer. */
+if (seg->resspc > 0)
+    EmitZero(out, seg->resspc);
+
 return 1;
 }
 

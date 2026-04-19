@@ -193,6 +193,7 @@ typedef struct InSeg {
     long  org;
     long  align;
     word  segkind;        /* raw kind word from header */
+    long  resspc;         /* RESSPC: trailing zero-fill bytes (inlined at merge) */
     long  fileBodyOffset; /* file offset of first body byte */
     long  bodyLen;        /* length of body in the input file */
     long  measuredLen;    /* length computed by pass-1 body walk */

@@ -151,6 +151,7 @@ bytecnt = (dword)b0 | ((dword)b1 << 8) | ((dword)b2 << 16) | ((dword)b3 << 24);
 if (bytecnt == 0) return 0;
 
 OmfReadDword(fp, &resspc);
+seg->resspc = (long)resspc;
 OmfReadDword(fp, &length);        /* logical body length */
 
 fgetc(fp);                        /* unused */
@@ -296,20 +297,27 @@ long OmfWriteSegHeader(FILE *fp, OutSeg *seg, long bodyLen, int segNum,
 {
 long bodyDisp;
 long blkcnt, totalLen;
-char ldBuf[10];
-int  i, llen;
+char loadBuf[10];
+char segBuf[10];
+int  i, slen;
+
+(void)loadName;    /* single-load-file output: LOADNAME is always blank */
 
 /* OMF v2.1 segment header layout:
  *   DISPNAME = $30 (48): fixed header + 4-byte tempORG, then names
- *   LOADNAME: 10 bytes, space-padded, no length prefix
- *   SEGNAME:  pstring, length 10, content = space-padded LOADNAME
+ *   LOADNAME: 10 bytes space-padded (blank for consolidated output)
+ *   SEGNAME:  pstring, length 10, space-padded seg->loadName
+ *       (stock iix link uses the merge key here, not the first input's
+ *       segName — so blank-loadName groups get blank SEGNAME, and
+ *       named groups like "KERN2" get SEGNAME = "KERN2")
  *   Body follows immediately; DISPDATA = 48 + 10 + 1 + 10 = 69. */
 
-/* Build 10-byte space-padded load name. loadName may be "" (all spaces). */
-llen = (int)strlen(loadName);
-if (llen > 10) llen = 10;
-for (i = 0; i < llen; i++) ldBuf[i] = loadName[i];
-for (; i < 10; i++)        ldBuf[i] = ' ';
+for (i = 0; i < 10; i++) loadBuf[i] = ' ';
+
+slen = (int)strlen(seg->loadName);
+if (slen > 10) slen = 10;
+for (i = 0; i < slen; i++) segBuf[i] = seg->loadName[i];
+for (; i < 10; i++)        segBuf[i] = ' ';
 
 bodyDisp = 48L + 10 + 1 + 10;    /* = 69 */
 totalLen = bodyDisp + bodyLen;
@@ -335,11 +343,11 @@ blkcnt   = totalLen;
 /* DISPDATA */ OmfWriteWord(fp, (int)bodyDisp);
 /* tempORG */ OmfWriteDword(fp, 0L);          /* v2.1 extension, unused */
 
-/* LOADNAME: 10 bytes space-padded */
-fwrite(ldBuf, 1, 10, fp);
-/* SEGNAME: pstring with length 10, content = ldBuf (matches LOADNAME) */
+/* LOADNAME: 10 blank bytes */
+fwrite(loadBuf, 1, 10, fp);
+/* SEGNAME: pstring length 10, content = space-padded seg->segName */
 OmfWriteByte(fp, 10);
-fwrite(ldBuf, 1, 10, fp);
+fwrite(segBuf, 1, 10, fp);
 
 return ftell(fp);
 }

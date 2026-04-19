@@ -273,6 +273,13 @@ OutSeg *out;
 measured = MeasureBody(inf->fp, seg);
 if (measured < 0) return 0;
 
+/* RESSPC: trailing reserved-space bytes the input declared. They're
+ * part of the input's memory image but not its body on disk. When
+ * merging input segments into an output segment, stock iix link
+ * inlines them as zero bytes so the merged body contains the full
+ * memory image (output RESSPC stays 0). Match that. */
+measured += seg->resspc;
+
 out = FindOrCreateOutSeg(seg->loadName, seg->segName, seg->segkind);
 seg->outSegNum  = out->segNum;
 seg->baseOffset = out->length;

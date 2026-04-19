@@ -256,16 +256,18 @@ PutLE(dst, 30, 69L,                         2);     /* DISPDATA — iix keeps th
                                                      * value here (not 0 as Loader Secrets
                                                      * claims).  69 = 48+10+1+10. */
 
-/* LOADNAME: 10 bytes, space-padded from seg->loadName */
-{
-int llen = (int)strlen(seg->loadName);
-if (llen > 10) llen = 10;
-for (i = 0; i < llen; i++) pad[i] = seg->loadName[i];
-for (; i < 10; i++)        pad[i] = ' ';
-}
+/* LOADNAME: 10 blank bytes (consolidated output). */
+for (i = 0; i < 10; i++) pad[i] = ' ';
 memcpy(dst + 32, pad, 10);
 
-/* SEGNAME pstring: length 10, same 10 bytes as LOADNAME */
+/* SEGNAME pstring: length 10, space-padded seg->loadName (see note in
+ * OmfWriteSegHeader — stock uses the merge-key loadName as SEGNAME). */
+{
+int slen = (int)strlen(seg->loadName);
+if (slen > 10) slen = 10;
+for (i = 0; i < slen; i++) pad[i] = seg->loadName[i];
+for (; i < 10; i++)        pad[i] = ' ';
+}
 dst[42] = 10;
 memcpy(dst + 43, pad, 10);
 }

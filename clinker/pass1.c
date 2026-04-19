@@ -292,6 +292,21 @@ int Pass1Seg(InputFile *inf, InSeg *seg)
 long measured;
 OutSeg *out;
 
+/* Assign output segment BEFORE walking the body so any
+ * OP_GLOBAL/OP_LOCAL/OP_ENTRY records inside the body see a valid
+ * seg->outSegNum and seg->baseOffset when they call SymDefine. The
+ * body walk is length-computation only — it doesn't depend on the
+ * already-accumulated out->length, so we can grow that AFTER. */
+out = FindOrCreateOutSeg(seg->loadName, seg->segName, seg->segkind);
+seg->outSegNum  = out->segNum;
+seg->baseOffset = out->length;
+
+/* Register segment name as a symbol (always define; may already exist
+ * from SymRequest before this segment was processed) */
+if (seg->segName[0])
+    SymDefine(seg->segName, seg->baseOffset, out->segNum,
+              SYM_PASS1_RESOLVED | SYM_IS_SEGMENT | SYM_IS_GLOBAL);
+
 measured = MeasureBody(inf->fp, seg);
 if (measured < 0) return 0;
 
@@ -302,16 +317,7 @@ if (measured < 0) return 0;
  * memory image (output RESSPC stays 0). Match that. */
 measured += seg->resspc;
 
-out = FindOrCreateOutSeg(seg->loadName, seg->segName, seg->segkind);
-seg->outSegNum  = out->segNum;
-seg->baseOffset = out->length;
-out->length    += measured;
-
-/* Register segment name as a symbol (always define; may already exist
- * from SymRequest before this segment was processed) */
-if (seg->segName[0])
-    SymDefine(seg->segName, seg->baseOffset, out->segNum,
-              SYM_PASS1_RESOLVED | SYM_IS_SEGMENT | SYM_IS_GLOBAL);
+out->length += measured;
 
 return 1;
 }
@@ -617,8 +623,18 @@ do {
     for (i = 0; i < SYM_HASH_SIZE; i++) {
         for (sym = symHash[i]; sym; sym = sym->next) {
             if (!(sym->flags & SYM_PASS1_REQUESTED)) continue;
-            if (sym->flags & SYM_PASS1_RESOLVED)     continue;
-
+            /* Only SKIP resolution if the symbol is resolved AND globally
+             * visible. A LOCAL-only def (from e.g. a compiler-mangled
+             * helper name used inside a pulled library segment) must
+             * NOT prevent LibrarySearch from finding the real GLOBAL
+             * export of the same name in another library. Stock iix
+             * link handles this via per-file private symbol tables;
+             * clinker's flat hash makes every def globally visible, so
+             * we gate skip on SYM_IS_GLOBAL to prevent a pulled-LOCAL
+             * from hiding a needed public symbol. */
+            if ((sym->flags & SYM_PASS1_RESOLVED) &&
+                (sym->flags & SYM_IS_GLOBAL))
+                continue;
             for (lf = libFiles; lf; lf = lf->next) {
                 const LibSymEntry *e;
                 BOOLEAN pulled = FALSE;

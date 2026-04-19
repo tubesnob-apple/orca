@@ -99,7 +99,7 @@ if (opcode == OP_GLOBAL || opcode == OP_LOCAL) {
     } else {
     /* EQU / GEQU: expression follows */
     EvalExpr(fp, pc, &value, &segOut, &fileOut, &needsReloc,
-             EXPR_PHASE_COLLECT);
+             EXPR_PHASE_COLLECT, NULL, NULL);
     symFlags |= SYM_IS_CONSTANT;
     }
 

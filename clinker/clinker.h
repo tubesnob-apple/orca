@@ -343,7 +343,8 @@ int  Pass2Seg(InputFile *inf, InSeg *seg, OutSeg *out);
  * phase is EXPR_PHASE_COLLECT (pass 1) or EXPR_PHASE_RESOLVE (pass 2).
  * Any of the output pointers may be NULL for "don't care". */
 int  EvalExpr(FILE *fp, long pc, long *result, int *segOut, int *fileOut,
-              BOOLEAN *needsReloc, int phase);
+              BOOLEAN *needsReloc, int phase,
+              int *shiftOut, long *unshiftedOut);
 void SkipExpr(FILE *fp, int phase);
 
 /* clinker.c (helpers used by other modules) */

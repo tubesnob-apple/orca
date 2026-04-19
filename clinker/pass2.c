@@ -308,23 +308,31 @@ for (;;) {
     else if (op == OP_EXPR || op == OP_ZEXPR || op == OP_BEXPR) {
         /* Evaluate the expression and emit pLen bytes into the LCONST
          * image.  If the result is relocatable, record the reference
-         * value (result) in the RELOC/INTERSEG entry so the loader
-         * patches (segment_base + result).  The LCONST bytes are
-         * double-encoded (we keep them in place so a future Phase 9
-         * SUPER packer can read reference values back from LCONST);
-         * the loader overwrites them via the reloc dictionary. */
+         * value in the RELOC/INTERSEG entry so the loader patches
+         * (segment_base + value). For a shifted expression (e.g.
+         * `FOO >> 16` for bank byte), stock iix link stores the
+         * UNSHIFTED reference in the record + LCONST and tags the
+         * reloc with the shift count, so the loader re-applies the
+         * shift at load time. Match that. */
         byte pLen = (byte)OmfReadByte(inf->fp);
         byte buf[4] = {0, 0, 0, 0};
         int  i;
-        EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc, EXPR_PHASE_RESOLVE);
+        int  shiftCount = 0;
+        long unshifted  = 0;
+        long storeVal;
+        byte shiftByte;
+        EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc,
+                 EXPR_PHASE_RESOLVE, &shiftCount, &unshifted);
+        storeVal  = (shiftCount != 0) ? unshifted : result;
+        shiftByte = (byte)(shiftCount & 0xFF);
         for (i = 0; i < pLen && i < 4; i++)
-            buf[i] = (byte)(result >> (i * 8));
+            buf[i] = (byte)(storeVal >> (i * 8));
         EmitData(out, buf, (long)pLen);
         if (needsReloc) {
             if (segOut != 0 && segOut != out->segNum)
-                AppendReloc(out, pc, pLen, 0, result, 1, segOut, 1);
+                AppendReloc(out, pc, pLen, shiftByte, storeVal, 1, segOut, 1);
             else
-                AppendReloc(out, pc, pLen, 0, result, 0, 0, 0);
+                AppendReloc(out, pc, pLen, shiftByte, storeVal, 0, 0, 0);
             }
         pc += pLen;
         }
@@ -336,7 +344,8 @@ for (;;) {
         int  i;
         OmfReadDword(inf->fp, &disp);
         base = (long)disp;
-        EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc, EXPR_PHASE_RESOLVE);
+        EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc,
+                 EXPR_PHASE_RESOLVE, NULL, NULL);
         result -= base;  /* relative displacement */
         for (i = 0; i < pLen && i < 4; i++)
             buf[i] = (byte)(result >> (i * 8));
@@ -361,22 +370,30 @@ for (;;) {
         OmfReadWord(inf->fp, &lenAttr);
         fgetc(inf->fp);
         fgetc(inf->fp);
-        EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc, EXPR_PHASE_RESOLVE);
+        EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc,
+                 EXPR_PHASE_RESOLVE, NULL, NULL);
         }
     else if (op == OP_LEXPR) {
         /* LEXPR ($F3): patch in outer segment; same layout as EXPR. */
         byte pLen = (byte)OmfReadByte(inf->fp);
         byte buf[4] = {0, 0, 0, 0};
         int  i;
-        EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc, EXPR_PHASE_RESOLVE);
+        int  shiftCount = 0;
+        long unshifted  = 0;
+        long storeVal;
+        byte shiftByte;
+        EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc,
+                 EXPR_PHASE_RESOLVE, &shiftCount, &unshifted);
+        storeVal  = (shiftCount != 0) ? unshifted : result;
+        shiftByte = (byte)(shiftCount & 0xFF);
         for (i = 0; i < pLen && i < 4; i++)
-            buf[i] = (byte)(result >> (i * 8));
+            buf[i] = (byte)(storeVal >> (i * 8));
         EmitData(out, buf, (long)pLen);
         if (needsReloc) {
             if (segOut != 0 && segOut != out->segNum)
-                AppendReloc(out, pc, pLen, 0, result, 1, segOut, 1);
+                AppendReloc(out, pc, pLen, shiftByte, storeVal, 1, segOut, 1);
             else
-                AppendReloc(out, pc, pLen, 0, result, 0, 0, 0);
+                AppendReloc(out, pc, pLen, shiftByte, storeVal, 0, 0, 0);
             }
         pc += pLen;
         }

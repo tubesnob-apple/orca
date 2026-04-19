@@ -119,6 +119,7 @@ typedef unsigned long  dword;
 #define SYM_IS_CONSTANT     0x10
 #define SYM_IS_DATA         0x20
 #define SYM_IS_SEGMENT      0x40
+#define SYM_IS_GLOBAL       0x80  /* OP_GLOBAL/GEQU/ENTRY/SEGNAME defined it */
 
 /* ---------------------------------------------------------- */
 /* Relocation record                                          */

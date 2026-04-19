@@ -464,7 +464,12 @@ else {
 
 #define SUPER_SUBTYPE_COUNT 38
 
-/* ClassifyRelocForSuper — best SUPER subtype for r, or -1 if unpackable. */
+/* ClassifyRelocForSuper — best SUPER subtype for r, or -1 if unpackable.
+ *
+ * Stock iix link encodes subtype = internal-segNum + 13 (where internal
+ * segNum is pre-ExpressLoad, 1..N); the GS/OS loader decodes via
+ * segment = type - 12, which (because ExpressLoad prepends as SEGNUM 1)
+ * correctly resolves to the post-remap segment number. Mirror that. */
 static int ClassifyRelocForSuper(const RelocRec *r)
 {
 if (r->pc < 0) return -1;
@@ -632,7 +637,8 @@ for (r = seg->relocHead; r; r = r->next) {
 
     if (subtype >= 2 && subtype <= 13) {
         /* INTERSEG1..12 (3-byte): 16-bit offset in bytes 0-1,
-         * target segment number in byte 2. */
+         * target segment number in byte 2 (same pre-remap convention
+         * as the subtype encoding — loader translates via remap). */
         seg->data[r->pc + 0] = (byte)(r->value);
         seg->data[r->pc + 1] = (byte)(r->value >> 8);
         seg->data[r->pc + 2] = (byte)(r->segNum);

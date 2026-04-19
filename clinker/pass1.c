@@ -93,17 +93,38 @@ ReadSymAttrs(fp, &isPrivate);
 
 symFlags = SYM_PASS1_RESOLVED;
 if (isPrivate) symFlags |= SEGKIND_PRIVATE;
+segOut = seg->outSegNum;
+
+/* OP_GLOBAL ($E6) and OP_GEQU ($E7) are externally visible;
+ * OP_LOCAL ($EF) and OP_EQU ($F0) are file-internal. ORCA/C emits
+ * many LOCAL symbols (helpers, static functions) whose names collide
+ * with GLOBALs in other files — if we let a later LOCAL overwrite an
+ * earlier GLOBAL in our flat symbol table, cross-file references
+ * resolve to the wrong segment. Flag GLOBAL symbols so SymDefine can
+ * reject downgrade attempts. */
+if (opcode == OP_GLOBAL || opcode == OP_GEQU)
+    symFlags |= SYM_IS_GLOBAL;
 
 if (opcode == OP_GLOBAL || opcode == OP_LOCAL) {
     value = pc;
     } else {
-    /* EQU / GEQU: expression follows */
+    /* EQU / GEQU: expression follows. Track segOut from the
+     * expression evaluator — an EQU whose RHS is a cross-segment
+     * label (e.g. GEQU pstrlen = <label in KERN3>) must record the
+     * TARGET segment, not the defining segment. Only the non-
+     * relocatable case is SYM_IS_CONSTANT. */
     EvalExpr(fp, pc, &value, &segOut, &fileOut, &needsReloc,
              EXPR_PHASE_COLLECT, NULL, NULL);
-    symFlags |= SYM_IS_CONSTANT;
+    if (!needsReloc) {
+        symFlags |= SYM_IS_CONSTANT;
+        segOut = seg->outSegNum;
+        }
+    else if (segOut == 0) {
+        segOut = seg->outSegNum;
+        }
     }
 
-SymDefine(name, value, seg->outSegNum, symFlags);
+SymDefine(name, value, segOut, symFlags);
 }
 
 /* ----------------------------------------------------------
@@ -206,7 +227,8 @@ for (;;) {
         for (p = name; *p; p++) *p = (char)toupper(*p);
         if (name[0])
             SymDefine(name, seg->baseOffset + (long)value,
-                      seg->outSegNum, SYM_PASS1_RESOLVED);
+                      seg->outSegNum,
+                      SYM_PASS1_RESOLVED | SYM_IS_GLOBAL);
         }
     else if (op == OP_RELOC) {
         /* pLen(1) shift(1) pc(4) value(4) = 10 more bytes */
@@ -289,7 +311,7 @@ out->length    += measured;
  * from SymRequest before this segment was processed) */
 if (seg->segName[0])
     SymDefine(seg->segName, seg->baseOffset, out->segNum,
-              SYM_PASS1_RESOLVED | SYM_IS_SEGMENT);
+              SYM_PASS1_RESOLVED | SYM_IS_SEGMENT | SYM_IS_GLOBAL);
 
 return 1;
 }

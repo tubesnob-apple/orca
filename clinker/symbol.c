@@ -66,6 +66,19 @@ if (!s) {
     s->next = symHash[h];
     symHash[h] = s;
     }
+/* Precedence: a GLOBAL definition wins over a LOCAL one. A later
+ * OP_LOCAL with the same name as an earlier OP_GLOBAL must not
+ * downgrade the symbol — ORCA/C emits many file-internal LOCAL
+ * helpers whose names collide with other files' GLOBAL exports, and
+ * clinker's flat (non-per-file) symbol table would otherwise resolve
+ * cross-file references to the wrong segment. The first GLOBAL
+ * definition sticks; subsequent LOCAL defines are recorded as a
+ * flag-only merge (so request/resolution state is preserved) but do
+ * not overwrite value/segNum. */
+if ((s->flags & SYM_IS_GLOBAL) && !(flags & SYM_IS_GLOBAL)) {
+    s->flags |= flags;
+    return s;
+    }
 s->value  = value;
 s->segNum = segNum;
 s->flags |= flags;

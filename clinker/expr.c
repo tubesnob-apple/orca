@@ -166,12 +166,12 @@ for (;;) {
         op == 0x84 || op == 0x85 || op == 0x86) {
         char    name[NAME_MAX];
         Symbol *sym;
-        char   *p;
         long    v = 0;
         unsigned int r = 0;
 
+        /* Pass original-case name through: SymFind is case-insensitive
+         * and SymRequest preserves the case in displayName. */
         OmfReadPString(fp, name, NAME_MAX);
-        for (p = name; *p; p++) *p = (char)toupper(*p);
 
         sym = SymFind(name);
         if (!sym || !(sym->flags & SYM_PASS1_RESOLVED)) {

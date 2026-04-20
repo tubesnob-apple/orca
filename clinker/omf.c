@@ -246,10 +246,9 @@ OmfReadPString(fp, seg->segName, NAME_MAX);
  * load name determines segment merging — collapsing "cg" and "CG"
  * (distinct load names in real ORCA/C input) into a single output
  * segment changes the file layout. */
-{
-char *p;
-for (p = seg->segName;  *p; p++) *p = (char)toupper(*p);
-}
+/* Keep seg->segName in its original case so SymDefine below preserves
+ * it for +S output. The segment-name symbol still hashes/compares
+ * case-insensitively via SymFind. */
 
 /* Body starts at startOff + DISPDATA */
 seg->fileBodyOffset = startOff + (long)dispbody;

@@ -78,7 +78,8 @@ if (outPrivate) *outPrivate = (int)privAttr;
    Called with the opcode already consumed.  Reads one
    GLOBAL/LOCAL/GEQU/EQU record and defines the symbol.
    ---------------------------------------------------------- */
-static void DefineFromRecord(FILE *fp, int opcode, InSeg *seg, long pc)
+static void DefineFromRecord(FILE *fp, int opcode, InSeg *seg, long pc,
+                             int dataArea)
 {
 char    name[NAME_MAX];
 int     isPrivate = 0;
@@ -86,10 +87,11 @@ int     symFlags;
 long    value;
 BOOLEAN needsReloc;
 int     segOut, fileOut;
-char   *p;
 
+/* Pass the original-case name to SymDefine — it uppercases internally
+ * for its hash/compare key but preserves the original in displayName
+ * for +S output. */
 OmfReadPString(fp, name, NAME_MAX);
-for (p = name; *p; p++) *p = (char)toupper(*p);
 
 ReadSymAttrs(fp, &isPrivate);
 
@@ -134,7 +136,7 @@ if (opcode == OP_GLOBAL || opcode == OP_LOCAL) {
         }
     }
 
-SymDefine(name, value, segOut, symFlags);
+SymDefineData(name, value, segOut, symFlags, dataArea);
 }
 
 /* ----------------------------------------------------------
@@ -144,7 +146,7 @@ SymDefine(name, value, segOut, symFlags);
    length.  Sets seg->measuredLen.  Returns the length on
    success, -1 on error.
    ---------------------------------------------------------- */
-long MeasureBody(FILE *fp, InSeg *seg)
+long MeasureBody(FILE *fp, InSeg *seg, int dataArea)
 {
 long pc = 0;
 int  op;
@@ -190,10 +192,10 @@ for (;;) {
         pc = (long)newpc;
         }
     else if (op == OP_GLOBAL || op == OP_LOCAL) {
-        DefineFromRecord(fp, op, seg, pc);
+        DefineFromRecord(fp, op, seg, pc, dataArea);
         }
     else if (op == OP_GEQU || op == OP_EQU) {
-        DefineFromRecord(fp, op, seg, pc);
+        DefineFromRecord(fp, op, seg, pc, dataArea);
         }
     else if (op == OP_EXPR || op == OP_ZEXPR || op == OP_BEXPR) {
         byte pLen = (byte)fgetc(fp);
@@ -228,17 +230,16 @@ for (;;) {
          * OUT, CNOUT, HASH, SAVEBF that Pascal emits as ENTRY
          * records. */
         char   name[NAME_MAX];
-        char  *p;
         word   reserved;
         dword  value;
         OmfReadWord(fp, &reserved);
         OmfReadDword(fp, &value);
         OmfReadPString(fp, name, NAME_MAX);
-        for (p = name; *p; p++) *p = (char)toupper(*p);
+        /* SymDefine preserves original case in displayName for +S. */
         if (name[0])
-            SymDefine(name, seg->baseOffset + (long)value,
-                      seg->outSegNum,
-                      SYM_PASS1_RESOLVED | SYM_IS_GLOBAL);
+            SymDefineData(name, seg->baseOffset + (long)value,
+                          seg->outSegNum,
+                          SYM_PASS1_RESOLVED | SYM_IS_GLOBAL, dataArea);
         }
     else if (op == OP_RELOC) {
         /* pLen(1) shift(1) pc(4) value(4) = 10 more bytes */
@@ -271,9 +272,7 @@ for (;;) {
          * ~GSOSIO, whose segment name appears only in USING records
          * inside other pulled library segments). */
         char name[NAME_MAX];
-        char *p;
         OmfReadPString(fp, name, NAME_MAX);
-        for (p = name; *p; p++) *p = (char)toupper(*p);
         SymRequest(name, 1);
         }
     else if (op == OP_MEM) {
@@ -301,6 +300,7 @@ int Pass1Seg(InputFile *inf, InSeg *seg)
 {
 long measured;
 OutSeg *out;
+int dataArea = 0;
 
 /* Assign output segment BEFORE walking the body so any
  * OP_GLOBAL/OP_LOCAL/OP_ENTRY records inside the body see a valid
@@ -308,6 +308,29 @@ OutSeg *out;
  * body walk is length-computation only — it doesn't depend on the
  * already-accumulated out->length, so we can grow that AFTER. */
 out = FindOrCreateOutSeg(seg->loadName, seg->segName, seg->segkind);
+
+/* GSplus WDM prologue reservation: when opt_gsplus, pass2 prepends an
+ * 8-byte prologue to the very first output segment (outSegs head).
+ * If we don't account for that prefix during pass1, every LOCAL/GLOBAL
+ * symbol defined in that output seg will have a value 8 bytes short of
+ * its post-injection position, and every reloc that references one of
+ * those symbols resolves to the wrong address at load time. Pre-bump
+ * out->length by 8 the FIRST time we see this output seg so all
+ * subsequent baseOffset/symbol/reloc calculations see the shifted
+ * layout. */
+if (opt_gsplus && out == outSegs && out->length == 0)
+    out->length = 8;
+
+/* Assign data-area number for DATA-kind input segments. Stock's
+ * seg.asm:1156 increments lastDataNumber per DATA input seg and
+ * attaches it to every LOCAL/GLOBAL defined inside that seg. Needed
+ * so +S output shows the same data-area column stock does (e.g.
+ * ADBData in segment 4 data-area 1C). */
+if ((seg->segkind & 0x1F) == SEGTYPE_DATA) {
+    out->lastDataArea++;
+    dataArea = out->lastDataArea;
+    }
+
 seg->outSegNum  = out->segNum;
 seg->baseOffset = out->length;
 
@@ -319,12 +342,18 @@ seg->baseOffset = out->length;
 exprSegStartPc = seg->baseOffset;
 
 /* Register segment name as a symbol (always define; may already exist
- * from SymRequest before this segment was processed) */
-if (seg->segName[0])
-    SymDefine(seg->segName, seg->baseOffset, out->segNum,
-              SYM_PASS1_RESOLVED | SYM_IS_SEGMENT | SYM_IS_GLOBAL);
+ * from SymRequest before this segment was processed). Propagate the
+ * segment's PRIVATE kind bit into the symbol so +S output prints `P`
+ * for segment-name symbols in private segments (e.g. CalcBankCH), as
+ * stock does. */
+if (seg->segName[0]) {
+    int segFlags = SYM_PASS1_RESOLVED | SYM_IS_SEGMENT | SYM_IS_GLOBAL;
+    if (seg->segkind & SEGKIND_PRIVATE)
+        segFlags |= SEGKIND_PRIVATE;
+    SymDefine(seg->segName, seg->baseOffset, out->segNum, segFlags);
+    }
 
-measured = MeasureBody(inf->fp, seg);
+measured = MeasureBody(inf->fp, seg, dataArea);
 if (measured < 0) return 0;
 
 /* RESSPC: trailing reserved-space bytes the input declared. They're
@@ -405,14 +434,10 @@ static int SegDefinesNeededSym(FILE *fp, InSeg *seg)
 int op;
 Symbol *sym;
 
-/* Check segment name itself (segment names become symbols) */
+/* Check segment name itself (segment names become symbols). SymFind
+ * is case-insensitive so we can pass segName verbatim. */
 if (seg->segName[0]) {
-    char *p;
-    char upper[NAME_MAX];
-    strncpy(upper, seg->segName, NAME_MAX - 1);
-    upper[NAME_MAX - 1] = 0;
-    for (p = upper; *p; p++) *p = (char)toupper(*p);
-    sym = SymFind(upper);
+    sym = SymFind(seg->segName);
     if (sym && (sym->flags & SYM_PASS1_REQUESTED) &&
                !(sym->flags & SYM_PASS1_RESOLVED))
         return 1;

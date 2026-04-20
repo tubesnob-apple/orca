@@ -145,6 +145,10 @@ typedef struct OutSeg {
     int   segNum;             /* output segment number */
     word  segType;            /* low 5 bits of KIND (enum-style type) */
     word  kind;                /* full 16-bit KIND word: type + flags */
+    int   lastDataArea;       /* running data-area counter — stock's
+                               * seg.asm lastDataNumber. Incremented for
+                               * each DATA-kind input segment that gets
+                               * merged in; reset to 0 per output seg. */
     long  length;             /* total byte length of combined data */
     long  org;                /* origin address (usually 0) */
     long  banksize;           /* bank size (usually $10000) */
@@ -167,9 +171,11 @@ typedef struct OutSeg {
 struct LibFile;             /* forward tag — full struct below */
 
 typedef struct Symbol {
-    char name[NAME_MAX];
+    char name[NAME_MAX];        /* uppercased — the hash/compare key */
+    char displayName[NAME_MAX]; /* original case — for +S output */
     long value;
     int  segNum;
+    int  dataArea;   /* data-area number (stock's symData) — +S only */
     int  flags;
     struct LibFile *reqLib;   /* first library that requested this symbol */
     int   reqFileNum;         /* MakeLib-internal file # of the requesting
@@ -277,6 +283,10 @@ extern dword     sfSig;         /* 32-bit link signature */
 /* symbol.c */
 Symbol *SymFind(const char *name);
 Symbol *SymDefine(const char *name, long value, int segNum, int flags);
+/* SymDefineData: like SymDefine but also records the symbol's data-area
+ * number. Used by DefineFromRecord for GLOBAL/LOCAL/EQU/GEQU defs. */
+Symbol *SymDefineData(const char *name, long value, int segNum,
+                      int flags, int dataArea);
 void    SymRequest(const char *name, int pass);
 void    SymDump(void);
 unsigned int SymHash(const char *name);
@@ -302,7 +312,7 @@ void    OmfWriteSuper(FILE *fp, OutSeg *seg);
 /* pass1.c */
 int  Pass1(void);
 int  Pass1Seg(InputFile *inf, InSeg *seg);
-long MeasureBody(FILE *fp, InSeg *seg);
+long MeasureBody(FILE *fp, InSeg *seg, int dataArea);
 void LibrarySearch(void);
 
 /* libdict.c — library dictionary cache + lookup */

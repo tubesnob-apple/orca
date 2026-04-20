@@ -128,7 +128,7 @@ if (opcode == OP_GLOBAL || opcode == OP_LOCAL) {
      * TARGET segment, not the defining segment. Only the non-
      * relocatable case is SYM_IS_CONSTANT. */
     EvalExpr(fp, pc, &value, &segOut, &fileOut, &needsReloc,
-             EXPR_PHASE_COLLECT, NULL, NULL);
+             EXPR_PHASE_COLLECT, seg->inputFileNum, NULL, NULL);
     if (!needsReloc) {
         symFlags |= SYM_IS_CONSTANT;
         segOut = seg->outSegNum;
@@ -142,9 +142,15 @@ if (opcode == OP_GLOBAL || opcode == OP_LOCAL) {
  * dataArea 0 regardless of what segment they appear in; LOCAL and EQU
  * record the segment's dataArea (0 for code segs, non-zero for data). */
 listDataArea = isGlobal ? 0 : dataArea;
-SymDefineData(name, value, segOut, symFlags, listDataArea);
-/* SymDump applies the ExpressLoad +1 remap when it prints, so pass the
- * raw (pre-remap) segNum here. */
+
+/* Stock's Define (symbol.asm:281-285) skips private (global=0) symbols
+ * when dataNumber == 0 — i.e. LOCAL/EQU labels inside CODE segments
+ * are never added to the symbol table, only their PC advance matters.
+ * ORCA/C emits hundreds of `lb0`/`lb1`/`~N` helpers per file; adding
+ * them all would bloat clinker's symbol table past the runtime heap
+ * ceiling ("out of memory (SymListEntry)" on the gno kernel link). */
+if (!isGlobal && dataArea == 0) return;
+SymDefineData(name, value, segOut, symFlags, seg->inputFileNum, listDataArea);
 SymAddListEntry(name, value, segOut, listDataArea, symFlags);
 }
 
@@ -208,19 +214,19 @@ for (;;) {
         }
     else if (op == OP_EXPR || op == OP_ZEXPR || op == OP_BEXPR) {
         byte pLen = (byte)fgetc(fp);
-        SkipExpr(fp, EXPR_PHASE_COLLECT);
+        SkipExpr(fp, EXPR_PHASE_COLLECT, seg->inputFileNum);
         pc += (long)pLen;
         }
     else if (op == OP_RELEXPR) {
         byte pLen = (byte)fgetc(fp);
         fseek(fp, 4, SEEK_CUR);  /* base displacement */
-        SkipExpr(fp, EXPR_PHASE_COLLECT);
+        SkipExpr(fp, EXPR_PHASE_COLLECT, seg->inputFileNum);
         pc += (long)pLen;
         }
     else if (op == OP_LEXPR) {
         /* LEXPR ($F3): like EXPR but patch is in outer segment; same layout */
         byte pLen = (byte)fgetc(fp);
-        SkipExpr(fp, EXPR_PHASE_COLLECT);
+        SkipExpr(fp, EXPR_PHASE_COLLECT, seg->inputFileNum);
         pc += (long)pLen;
         }
     else if (op == OP_ENTRY) {
@@ -251,7 +257,8 @@ for (;;) {
         if (name[0]) {
             long entryVal = seg->baseOffset + (long)value;
             SymDefineData(name, entryVal, seg->outSegNum,
-                          SYM_PASS1_RESOLVED | SYM_IS_GLOBAL, 0);
+                          SYM_PASS1_RESOLVED | SYM_IS_GLOBAL,
+                          seg->inputFileNum, 0);
             SymAddListEntry(name, entryVal, seg->outSegNum, 0,
                             SYM_PASS1_RESOLVED | SYM_IS_GLOBAL);
             }
@@ -288,7 +295,7 @@ for (;;) {
          * inside other pulled library segments). */
         char name[NAME_MAX];
         OmfReadPString(fp, name, NAME_MAX);
-        SymRequest(name, 1);
+        SymRequest(name, 1, seg->inputFileNum);
         }
     else if (op == OP_MEM) {
         /* MEM: two 4-byte numbers */
@@ -367,7 +374,8 @@ if (seg->segName[0]) {
     int segFlags = SYM_PASS1_RESOLVED | SYM_IS_SEGMENT | SYM_IS_GLOBAL;
     if (seg->segkind & SEGKIND_PRIVATE)
         segFlags |= SEGKIND_PRIVATE;
-    SymDefine(seg->segName, seg->baseOffset, out->segNum, segFlags);
+    SymDefine(seg->segName, seg->baseOffset, out->segNum, segFlags,
+              seg->inputFileNum);
     SymAddListEntry(seg->segName, seg->baseOffset, out->segNum,
                     dataArea, segFlags);
     }
@@ -453,10 +461,9 @@ static int SegDefinesNeededSym(FILE *fp, InSeg *seg)
 int op;
 Symbol *sym;
 
-/* Check segment name itself (segment names become symbols). SymFind
- * is case-insensitive so we can pass segName verbatim. */
+/* Check segment name itself (segment names become symbols). */
 if (seg->segName[0]) {
-    sym = SymFind(seg->segName);
+    sym = SymFind(seg->segName, seg->inputFileNum);
     if (sym && (sym->flags & SYM_PASS1_REQUESTED) &&
                !(sym->flags & SYM_PASS1_RESOLVED))
         return 1;
@@ -489,7 +496,7 @@ for (;;) {
         Symbol *sym;
         OmfReadPString(fp, name, NAME_MAX);
         fseek(fp, 4, SEEK_CUR);  /* skip 4 bytes of attrs */
-        sym = SymFind(name);
+        sym = SymFind(name, seg->inputFileNum);
         if (sym && (sym->flags & SYM_PASS1_REQUESTED) &&
                    !(sym->flags & SYM_PASS1_RESOLVED))
             return 1;
@@ -499,8 +506,8 @@ for (;;) {
         Symbol *sym;
         OmfReadPString(fp, name, NAME_MAX);
         fseek(fp, 4, SEEK_CUR);  /* skip attrs */
-        SkipExpr(fp, EXPR_PHASE_COLLECT);
-        sym = SymFind(name);
+        SkipExpr(fp, EXPR_PHASE_COLLECT, seg->inputFileNum);
+        sym = SymFind(name, seg->inputFileNum);
         if (sym && (sym->flags & SYM_PASS1_REQUESTED) &&
                    !(sym->flags & SYM_PASS1_RESOLVED))
             return 1;
@@ -513,12 +520,12 @@ for (;;) {
     else if (op == OP_EXPR || op == OP_ZEXPR || op == OP_BEXPR ||
              op == OP_LEXPR) {
         fgetc(fp);
-        SkipExpr(fp, EXPR_PHASE_COLLECT);
+        SkipExpr(fp, EXPR_PHASE_COLLECT, seg->inputFileNum);
         }
     else if (op == OP_RELEXPR) {
         fgetc(fp);
         fseek(fp, 4, SEEK_CUR);
-        SkipExpr(fp, EXPR_PHASE_COLLECT);
+        SkipExpr(fp, EXPR_PHASE_COLLECT, seg->inputFileNum);
         }
     else if (op == OP_ENTRY) {
         /* ENTRY defines a named entry point within the segment.
@@ -531,7 +538,7 @@ for (;;) {
         OmfReadWord(fp, &reserved);
         OmfReadDword(fp, &value);
         OmfReadPString(fp, name, NAME_MAX);
-        sym = SymFind(name);
+        sym = SymFind(name, seg->inputFileNum);
         if (sym && (sym->flags & SYM_PASS1_REQUESTED) &&
                    !(sym->flags & SYM_PASS1_RESOLVED))
             return 1;
@@ -695,7 +702,9 @@ do {
             for (i = 0; i < lf->numSyms; i++) {
                 const LibSymEntry *e = LibDictAtSeq(lf, i);
                 if (!e) break;
-                sym = SymFind(e->name);
+                /* Library-dict sweep: any matching request satisfies
+                 * the lookup regardless of file-scope, so fileNum=0. */
+                sym = SymFind(e->name, 0);
                 if (!sym) continue;
                 if (!(sym->flags & SYM_PASS1_REQUESTED)) continue;
                 /* Skip only if resolved AND globally visible — see note

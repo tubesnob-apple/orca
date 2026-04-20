@@ -167,12 +167,22 @@ typedef struct OutSeg {
 struct LibFile;             /* forward tag — full struct below */
 
 typedef struct Symbol {
-    char name[NAME_MAX];        /* uppercased — the hash/compare key */
-    char displayName[NAME_MAX]; /* original case — for +S output */
+    char name[NAME_MAX];        /* case-sensitive hash/compare key */
     long value;
     int  segNum;
     int  dataArea;   /* data-area number (stock's symData) — +S only */
     int  flags;
+    /* fileNum scopes private symbols per stock's symFile tagging. Each
+     * (name, fileNum) pair is a distinct chain entry for private
+     * symbols. Public (non-private) entries use fileNum=0. Matches
+     * stock's Define/Reference behaviour (symbol.asm:287 / :1372): when
+     * file F references name X, the linker prefers a private entry
+     * whose symFile==F; falls back to any public entry; finally to any
+     * private entry (by chain order). Without this scoping, clinker's
+     * flat hash table collapses multiple files' private `~GLOBALS`/
+     * `~ARRAYS` (or any name-colliding LOCAL) into one entry, and
+     * expression evaluation returns the wrong symbol's value. */
+    int  fileNum;
     struct LibFile *reqLib;   /* first library that requested this symbol */
     int   reqFileNum;         /* MakeLib-internal file # of the requesting
                                * lib segment (0 = external / no scope).
@@ -297,18 +307,32 @@ extern dword     sfSig;         /* 32-bit link signature */
 /* ---------------------------------------------------------- */
 
 /* symbol.c */
-Symbol *SymFind(const char *name);
-Symbol *SymDefine(const char *name, long value, int segNum, int flags);
+/* SymFind: resolve `name` from the perspective of file `fileNum`.
+ * Lookup order, matching stock symbol.asm GetSymbolValue:
+ *   1. Private entry whose fileNum matches (caller's own private def).
+ *   2. Public entry (SEGKIND_PRIVATE clear).
+ *   3. Any private entry for this name (chain-first; pragmatic fallback
+ *      for the sys.root → ~GLOBALS case, where stock nominally returns
+ *      nosym but the linked kernel behaves as if it got the first-
+ *      defined `~GLOBALS`).
+ * Pass fileNum=0 to skip the private-scope preference entirely. */
+Symbol *SymFind(const char *name, int fileNum);
+/* SymDefine: private entries are keyed by (name, fileNum); public
+ * entries use fileNum=0. First-define wins for segment-name symbols
+ * within a (name, fileNum) bucket — later same-scope duplicates merge
+ * flags only. */
+Symbol *SymDefine(const char *name, long value, int segNum, int flags,
+                  int fileNum);
 /* SymDefineData: like SymDefine but also records the symbol's data-area
  * number. Used by DefineFromRecord for GLOBAL/LOCAL/EQU/GEQU defs. */
 Symbol *SymDefineData(const char *name, long value, int segNum,
-                      int flags, int dataArea);
+                      int flags, int fileNum, int dataArea);
 /* SymAddListEntry: append one entry to the +S listing. Call once per
  * define (segname, GLOBAL, LOCAL, GEQU, EQU, ENTRY). Decoupled from
  * the hash table so per-file duplicates are all retained for +S. */
 void    SymAddListEntry(const char *displayName, long value, int segNum,
                         int dataArea, int flags);
-void    SymRequest(const char *name, int pass);
+void    SymRequest(const char *name, int pass, int fileNum);
 void    SymDump(void);
 unsigned int SymHash(const char *name);
 
@@ -381,9 +405,9 @@ int  Pass2Seg(InputFile *inf, InSeg *seg, OutSeg *out);
  * match stock exp.asm semantics. */
 extern long exprSegStartPc;
 int  EvalExpr(FILE *fp, long pc, long *result, int *segOut, int *fileOut,
-              BOOLEAN *needsReloc, int phase,
+              BOOLEAN *needsReloc, int phase, int fileNum,
               int *shiftOut, long *unshiftedOut);
-void SkipExpr(FILE *fp, int phase);
+void SkipExpr(FILE *fp, int phase, int fileNum);
 
 /* clinker.c (helpers used by other modules) */
 void   LinkError(const char *msg, const char *name);

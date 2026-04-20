@@ -53,52 +53,91 @@ while (*name)
 return h % SYM_HASH_SIZE;
 }
 
-Symbol *SymFind(const char *name)
+/* Per-file scoping is applied ONLY to segment-name symbols (~GLOBALS,
+ * ~ARRAYS, per-file autogen data areas). Stock tags those private per
+ * (name, fileNumber); a flat table collapses all 16 files' ~GLOBALS
+ * into one entry and bank-setup (~GLOBALS>>8) patches resolve to the
+ * wrong bank.
+ *
+ * Non-segment private symbols (LOCAL, EQU) are NOT scoped per-file.
+ * Stock's Define (symbol.asm:281-285) only enters private defines
+ * into the table for DATA segments (dataNumber != 0); code-segment
+ * private defines are silently dropped. Clinker's matching filter
+ * lives in pass1.c's DefineFromRecord. */
+Symbol *SymFind(const char *name, int fileNum)
+{
+Symbol *s;
+Symbol *public_match   = NULL;
+Symbol *any_seg_match  = NULL;
+Symbol *unresolved     = NULL;   /* pass1-requested placeholder */
+unsigned int h = SymHash(name);
+
+for (s = symHash[h]; s; s = s->next) {
+    if (strcmp(s->name, name) != 0) continue;
+    /* Unresolved placeholders (from SymRequest before a define lands)
+     * are last-resort — a resolved entry always wins. */
+    if (!(s->flags & SYM_PASS1_RESOLVED)) {
+        if (!unresolved) unresolved = s;
+        continue;
+        }
+    if ((s->flags & SYM_IS_SEGMENT) && (s->flags & SEGKIND_PRIVATE)) {
+        if (fileNum != 0 && s->fileNum == fileNum) return s;
+        /* Last-encountered in chain walk = first-defined (chain is
+         * LIFO). Matches what stock's kernel link resolves to for
+         * sys.root's cross-file `~GLOBALS` reference. */
+        any_seg_match = s;
+        continue;
+        }
+    if (!public_match) public_match = s;
+    }
+if (public_match)  return public_match;
+if (any_seg_match) return any_seg_match;
+return unresolved;
+}
+
+static Symbol *SymFindExact(const char *name, int fileNum,
+                            int scopePerFile)
 {
 Symbol *s;
 unsigned int h = SymHash(name);
-
-for (s = symHash[h]; s; s = s->next)
-    if (strcmp(s->name, name) == 0)
-        return s;
+for (s = symHash[h]; s; s = s->next) {
+    if (strcmp(s->name, name) != 0) continue;
+    if (scopePerFile && s->fileNum != fileNum) continue;
+    return s;
+    }
 return NULL;
 }
 
-Symbol *SymDefine(const char *name, long value, int segNum, int flags)
+Symbol *SymDefine(const char *name, long value, int segNum, int flags,
+                  int fileNum)
 {
 Symbol *s;
 unsigned int h;
+/* Only segment-name private symbols get their own per-file entry.
+ * Everything else (public globals, non-segment private) uses one
+ * shared entry per name. */
+int scopePerFile = ((flags & SYM_IS_SEGMENT) &&
+                    (flags & SEGKIND_PRIVATE)) ? 1 : 0;
+int keyFile      = scopePerFile ? fileNum : 0;
 
-s = SymFind(name);
+s = SymFindExact(name, keyFile, scopePerFile);
 if (!s) {
     s = (Symbol *)malloc(sizeof(Symbol));
     if (!s) FatalError("out of memory (symbol table)");
     memset(s, 0, sizeof(Symbol));
-    strncpy(s->name,        name, NAME_MAX - 1);
-    strncpy(s->displayName, name, NAME_MAX - 1);
+    strncpy(s->name, name, NAME_MAX - 1);
+    s->fileNum = keyFile;
     h = SymHash(name);
     s->next = symHash[h];
     symHash[h] = s;
     }
-/* Precedence: a GLOBAL definition wins over a LOCAL one. A later
- * OP_LOCAL with the same name as an earlier OP_GLOBAL must not
- * downgrade the symbol — ORCA/C emits many file-internal LOCAL
- * helpers whose names collide with other files' GLOBAL exports, and
- * clinker's flat (non-per-file) symbol table would otherwise resolve
- * cross-file references to the wrong segment. The first GLOBAL
- * definition sticks; subsequent LOCAL defines are recorded as a
- * flag-only merge (so request/resolution state is preserved) but do
- * not overwrite value/segNum. */
+/* GLOBAL beats LOCAL on collision — don't let a later LOCAL overwrite
+ * a public GLOBAL. */
 if ((s->flags & SYM_IS_GLOBAL) && !(flags & SYM_IS_GLOBAL)) {
     s->flags |= flags;
     return s;
     }
-/* First-wins for segment-name symbols. Each input file that has a
- * private autogen segment (e.g. ~GLOBALS, ~ARRAYS) defines a
- * segment-name symbol at its own baseOffset within the merged output
- * segment. Stock resolves EXPR references to the first-defined entry
- * (main.a's at offset 0); last-wins would overwrite with vroot.a's at
- * offset 0x200F and corrupt every (~GLOBALS>>8) bank-setup patch. */
+/* Segment-name redefines within the same scope bucket are idempotent. */
 if ((s->flags & SYM_IS_SEGMENT) && (flags & SYM_IS_SEGMENT)) {
     s->flags |= flags;
     return s;
@@ -110,9 +149,9 @@ return s;
 }
 
 Symbol *SymDefineData(const char *name, long value, int segNum,
-                      int flags, int dataArea)
+                      int flags, int fileNum, int dataArea)
 {
-Symbol *s = SymDefine(name, value, segNum, flags);
+Symbol *s = SymDefine(name, value, segNum, flags, fileNum);
 /* Only record dataArea if this is the definitive define (not a flag-
  * only merge where GLOBAL overrides a LOCAL redefine). Using the same
  * "was this redefine accepted" heuristic as SymDefine: if s->value
@@ -146,17 +185,20 @@ if (!symList) {
 symListTail = e;
 }
 
-void SymRequest(const char *name, int pass)
+void SymRequest(const char *name, int pass, int fileNum)
 {
 Symbol *s;
 
-s = SymFind(name);
+/* Requests follow the same scoping rules as lookups so a file's own
+ * private name resolves to its own entry (creates one if missing);
+ * cross-file public references create a public request entry. */
+s = SymFind(name, fileNum);
 if (!s) {
     s = (Symbol *)malloc(sizeof(Symbol));
     if (!s) FatalError("out of memory (symbol table)");
     memset(s, 0, sizeof(Symbol));
-    strncpy(s->name,        name, NAME_MAX - 1);
-    strncpy(s->displayName, name, NAME_MAX - 1);
+    strncpy(s->name, name, NAME_MAX - 1);
+    s->fileNum = 0;   /* public-request placeholder */
     unsigned int h = SymHash(name);
     s->next = symHash[h];
     symHash[h] = s;

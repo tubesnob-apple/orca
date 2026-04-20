@@ -52,7 +52,7 @@ long exprSegStartPc = 0;
 
 int EvalExpr(FILE *fp, long pc, long *result,
              int *segOut, int *fileOut,
-             BOOLEAN *needsReloc, int phase,
+             BOOLEAN *needsReloc, int phase, int fileNum,
              int *shiftOut, long *unshiftedOut)
 {
 long stack[EXPR_STACK_DEPTH];
@@ -169,16 +169,14 @@ for (;;) {
         long    v = 0;
         unsigned int r = 0;
 
-        /* Pass original-case name through: SymFind is case-insensitive
-         * and SymRequest preserves the case in displayName. */
         OmfReadPString(fp, name, NAME_MAX);
 
-        sym = SymFind(name);
+        sym = SymFind(name, fileNum);
         if (!sym || !(sym->flags & SYM_PASS1_RESOLVED)) {
             /* WEAK resolves to 0 silently; STRONG triggers library
              * search in pass 1 or link error in pass 2. */
             if (op != EXPR_WEAK) {
-                if (phase == EXPR_PHASE_COLLECT) SymRequest(name, 1);
+                if (phase == EXPR_PHASE_COLLECT) SymRequest(name, 1, fileNum);
                 else if (op == EXPR_STRONG) LinkError("undefined symbol", name);
                 }
             }
@@ -216,10 +214,11 @@ return 1;
  * effects (marking symbols for library search in phase 1). Discards the
  * computed value.  Used by pass-1 callers that need to scan past an
  * expression without caring about its result. */
-void SkipExpr(FILE *fp, int phase)
+void SkipExpr(FILE *fp, int phase, int fileNum)
 {
 long  result;
 int   segOut, fileOut;
 BOOLEAN needsReloc;
-EvalExpr(fp, 0L, &result, &segOut, &fileOut, &needsReloc, phase, NULL, NULL);
+EvalExpr(fp, 0L, &result, &segOut, &fileOut, &needsReloc, phase, fileNum,
+         NULL, NULL);
 }

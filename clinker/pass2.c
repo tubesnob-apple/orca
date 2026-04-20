@@ -333,7 +333,8 @@ for (;;) {
         long storeVal;
         byte shiftByte;
         EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc,
-                 EXPR_PHASE_RESOLVE, &shiftCount, &unshifted);
+                 EXPR_PHASE_RESOLVE, seg->inputFileNum,
+                 &shiftCount, &unshifted);
         storeVal  = (shiftCount != 0) ? unshifted : result;
         shiftByte = (byte)(shiftCount & 0xFF);
         for (i = 0; i < pLen && i < 4; i++)
@@ -356,7 +357,7 @@ for (;;) {
         OmfReadDword(inf->fp, &disp);
         base = (long)disp;
         EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc,
-                 EXPR_PHASE_RESOLVE, NULL, NULL);
+                 EXPR_PHASE_RESOLVE, seg->inputFileNum, NULL, NULL);
         /* PC-relative displacement: the stored value is
          *   expression_value - (patch_address + base)
          * where `pc` is the merged-output offset of the patch location
@@ -393,7 +394,7 @@ for (;;) {
         fgetc(inf->fp);
         fgetc(inf->fp);
         EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc,
-                 EXPR_PHASE_RESOLVE, NULL, NULL);
+                 EXPR_PHASE_RESOLVE, seg->inputFileNum, NULL, NULL);
         }
     else if (op == OP_LEXPR) {
         /* LEXPR ($F3): patch in outer segment; same layout as EXPR. */
@@ -405,7 +406,8 @@ for (;;) {
         long storeVal;
         byte shiftByte;
         EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc,
-                 EXPR_PHASE_RESOLVE, &shiftCount, &unshifted);
+                 EXPR_PHASE_RESOLVE, seg->inputFileNum,
+                 &shiftCount, &unshifted);
         storeVal  = (shiftCount != 0) ? unshifted : result;
         shiftByte = (byte)(shiftCount & 0xFF);
         for (i = 0; i < pLen && i < 4; i++)

@@ -46,6 +46,8 @@
 
 #include "clinker.h"
 
+segment "PASS1";
+
 /* Expression handling lives in expr.c — pass 1 uses EXPR_PHASE_COLLECT
  * to mark unresolved references for library search. */
 
@@ -525,7 +527,6 @@ for (;;) {
         if (!inf) FatalError("out of memory (LibInputFile)");
         memset(inf, 0, sizeof(InputFile));
         inf->fp      = lf->fp;
-        inf->isLib   = TRUE;
         inf->fileNum = ++(*seqCounter);
         strncpy(inf->name, lf->path, PATH_MAX - 1);
         inf->segs    = seg;
@@ -577,7 +578,6 @@ inf = (InputFile *)malloc(sizeof(InputFile));
 if (!inf) FatalError("out of memory (LibInputFile)");
 memset(inf, 0, sizeof(InputFile));
 inf->fp      = lf->fp;
-inf->isLib   = TRUE;
 inf->fileNum = ++(*seqCounter);
 strncpy(inf->name, lf->path, PATH_MAX - 1);
 inf->segs    = seg;

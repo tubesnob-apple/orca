@@ -22,6 +22,11 @@
 
 #include "clinker.h"
 
+/* Place all this file's code into a separate load segment so it doesn't
+ * eat root code-bank budget. Note: it's a bare `segment` statement, not
+ * `#pragma segment` — the pragma docs are misleading. */
+segment "GSPLUS";
+
 /*
  * InitGsplusSymbols — consult the gsplusSymbols shell variable and,
  * if set, enable sidecar emission and compute sfSig.  The signature

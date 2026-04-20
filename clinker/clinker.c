@@ -13,10 +13,8 @@
 *    +L    list segment info
 *    +S    list symbol table after link
 *    -X    disable express-load segment (default: enabled)
-*    +W    pause on error
 *    +M    memory-only link (no keep file written)
 *    -C    disable compact records
-*    +B    bank-org mode
 *    -P    disable progress messages (default: show progress)
 *
 *  Shell variable:
@@ -36,14 +34,12 @@
 BOOLEAN  opt_list     = FALSE;
 BOOLEAN  opt_symbols  = FALSE;
 BOOLEAN  opt_express  = TRUE;  /* ExpressLoad on by default (matches iix link); -X disables */
-BOOLEAN  opt_pause    = FALSE;
 BOOLEAN  opt_memory   = FALSE;
 BOOLEAN  opt_compact  = TRUE;
-BOOLEAN  opt_bankorg  = FALSE;
 BOOLEAN  opt_progress = TRUE;
 BOOLEAN  opt_gsplus   = FALSE;
-char     keepName[PATH_MAX] = "";
-char     baseName[PATH_MAX] = "";
+char    *keepName = NULL;   /* malloc'd in main() */
+char    *baseName = NULL;
 
 int      numErrors  = 0;
 InputFile *inputFiles = NULL;
@@ -213,9 +209,7 @@ char flag = (char)toupper((int)arg[1]);
 if (sign == '+') {
     if      (flag == 'L') opt_list     = TRUE;
     else if (flag == 'S') opt_symbols  = TRUE;
-    else if (flag == 'W') opt_pause    = TRUE;
     else if (flag == 'M') opt_memory   = TRUE;
-    else if (flag == 'B') opt_bankorg  = TRUE;
     else if (flag == 'X') opt_express  = FALSE;  /* +X = no express (same as -X in asm) */
     else fprintf(stderr, "clinker: unknown flag: %s\n", arg);
     } else {
@@ -450,9 +444,14 @@ int main(int argc, char *argv[])
 int ok;
 BOOLEAN fromShell;
 
-/* Allocate the symbol-table hash array on the heap to keep ~_ROOT
- * (the data bank) under 64KB. */
+/* Heap allocations. Policy: malloc for anything that doesn't have to be
+ * static (see CONVENTIONS at top of file). */
 SymInit();
+keepName = (char *)malloc(PATH_MAX);
+baseName = (char *)malloc(PATH_MAX);
+if (!keepName || !baseName) FatalError("out of memory (name buffers)");
+keepName[0] = '\0';
+baseName[0] = '\0';
 
 /* Try the iix-link path first: if the shell has LangInfo queued
  * (our symlink at /Library/GoldenGate/Languages/Linker → clinker

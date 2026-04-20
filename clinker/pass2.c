@@ -15,6 +15,8 @@
 
 #include "clinker.h"
 
+segment "PASS2";
+
 /* Expression handling lives in expr.c — pass 2 uses EXPR_PHASE_RESOLVE
  * so that unresolved STRONG references become link-time errors. */
 
@@ -205,6 +207,9 @@ int  op;
 BOOLEAN needsReloc;
 long result;
 int  segOut, fileOut;
+
+/* Seed SegDisp ($87) anchor for this segment. See EvalExpr. */
+exprSegStartPc = seg->baseOffset;
 
 if (fseek(inf->fp, seg->fileBodyOffset, SEEK_SET) != 0)
     return 0;

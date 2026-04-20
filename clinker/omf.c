@@ -38,6 +38,10 @@
 
 #include "clinker.h"
 
+/* OMF I/O primitives in their own OMF load segment. Hot — called from
+ * pass1, pass2, out — but every caller uses large-model JSL already. */
+segment "OMF";
+
 /* ----------------------------------------------------------
    Read helpers
    ---------------------------------------------------------- */

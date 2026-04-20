@@ -33,6 +33,11 @@
 
 #include "clinker.h"
 
+/* Library-dictionary parser + lookup gets its own LIBDICT load segment.
+ * Hot during pass-1 library search, but all callers are confined to
+ * pass1.c, so cross-segment calls don't ripple elsewhere. */
+segment "LIBDICT";
+
 /* Read N-byte little-endian unsigned integer from buf+off. */
 static dword ReadLE(const byte *buf, long off, int n)
 {

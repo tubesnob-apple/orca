@@ -11,6 +11,18 @@
 #define CLINKER_H
 
 #pragma lint 0
+/* Large memory model: compiler emits JSL + 24-bit long-absolute
+ * addressing for every call and data reference. Required so functions
+ * placed in a separate load segment (via `segment "NAME";`) can be
+ * called from other segments when the loader places them in different
+ * banks. Slower for intra-bank calls, but we don't care about
+ * per-instruction performance here.
+ *
+ * NOTE: repo's Docs/pragma-reference.md has 0/1 backwards. Source of
+ * truth is Scanner.pas:3670 `smallMemoryModel := expressionValue = 0`
+ * with default `smallMemoryModel := true` (CGI.pas:873) — so 0 = small
+ * (default), 1 = large. */
+#pragma memorymodel 1
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,8 +53,6 @@ typedef unsigned long  dword;
 /* Limits                                                     */
 /* ---------------------------------------------------------- */
 
-#define MAX_FILES      128     /* max input object/lib files */
-#define MAX_SEGS       256     /* max output segments */
 #define SYM_HASH_SIZE  1021   /* prime hash table size */
 #define NAME_MAX       32      /* max symbol/segment name bytes */
 #define PATH_MAX       256     /* max file path */
@@ -75,17 +85,9 @@ typedef unsigned long  dword;
 #define OP_CINTERSEG  0xF6
 #define OP_SUPER      0xF7
 
-/* Expression operand opcodes */
+/* Expression-stream opcodes used by name. Arithmetic opcodes (0x01–0x15)
+ * are decoded by raw number inside expr.c — no #define for them. */
 #define EXPR_END      0x00
-#define EXPR_OP_ADD   0x01
-#define EXPR_OP_SUB   0x02
-#define EXPR_OP_MUL   0x03
-#define EXPR_OP_DIV   0x04
-#define EXPR_OP_MOD   0x05
-#define EXPR_OP_NOT   0x06
-#define EXPR_OP_AND   0x09
-#define EXPR_OP_OR    0x0A
-#define EXPR_OP_XOR   0x0B
 #define EXPR_PC       0x80
 #define EXPR_CONST    0x81
 #define EXPR_WEAK     0x82
@@ -102,7 +104,6 @@ typedef unsigned long  dword;
 
 #define SEGTYPE_CODE    0x00
 #define SEGTYPE_DATA    0x01
-#define SEGTYPE_JUMP    0x12   /* jump table */
 #define SEGTYPE_EXPRESS 0x8001 /* express-load dynamic segment */
 
 /* Full type word flags */
@@ -113,11 +114,9 @@ typedef unsigned long  dword;
 /* ---------------------------------------------------------- */
 
 #define SYM_PASS1_RESOLVED  0x01
-#define SYM_PASS2_RESOLVED  0x02
 #define SYM_PASS1_REQUESTED 0x04
 #define SYM_PASS2_REQUESTED 0x08
 #define SYM_IS_CONSTANT     0x10
-#define SYM_IS_DATA         0x20
 #define SYM_IS_SEGMENT      0x40
 #define SYM_IS_GLOBAL       0x80  /* OP_GLOBAL/GEQU/ENTRY/SEGNAME defined it */
 
@@ -189,7 +188,6 @@ typedef struct InSeg {
     char  loadName[NAME_MAX];
     char  segName[NAME_MAX];
     word  segType;
-    word  segVersion;
     long  banksize;
     long  org;
     long  align;
@@ -212,7 +210,6 @@ typedef struct InputFile {
     char  name[PATH_MAX];
     FILE *fp;
     int   fileNum;        /* 1-based file index */
-    BOOLEAN isLib;        /* is this a library file? */
     InSeg *segs;          /* linked list of segments in this file */
     struct InputFile *next;
 } InputFile;
@@ -225,14 +222,12 @@ typedef struct InputFile {
 extern BOOLEAN opt_list;       /* +L: list segment info */
 extern BOOLEAN opt_symbols;    /* +S: list symbol table */
 extern BOOLEAN opt_express;    /* +X: express load (default on, -X turns off) */
-extern BOOLEAN opt_pause;      /* +W: pause on error */
 extern BOOLEAN opt_memory;     /* +M: memory-only link */
 extern BOOLEAN opt_compact;    /* -C: disable compact records (default compact) */
-extern BOOLEAN opt_bankorg;    /* +B: bank org */
 extern BOOLEAN opt_progress;   /* -P: disable progress (default on) */
 extern BOOLEAN opt_gsplus;     /* gsplusSymbols shell var set */
-extern char    keepName[PATH_MAX];  /* keep= file name */
-extern char    baseName[PATH_MAX];  /* basename of keepName */
+extern char   *keepName;   /* keep= file name (malloc'd PATH_MAX in main) */
+extern char   *baseName;   /* basename of keepName (malloc'd PATH_MAX) */
 
 /* Parsed entry from a library dictionary ($08) segment.
  * See GS/OS Reference Appendix F for the on-disk format. */
@@ -342,7 +337,12 @@ int  Pass2Seg(InputFile *inf, InSeg *seg, OutSeg *out);
 
 /* expr.c — unified expression walker used by both passes.
  * phase is EXPR_PHASE_COLLECT (pass 1) or EXPR_PHASE_RESOLVE (pass 2).
- * Any of the output pointers may be NULL for "don't care". */
+ * Any of the output pointers may be NULL for "don't care".
+ *
+ * Pass2Seg must set exprSegStartPc = seg->baseOffset before walking a
+ * segment so the SegDisp ($87) opcode can push (startpc + operand) to
+ * match stock exp.asm semantics. */
+extern long exprSegStartPc;
 int  EvalExpr(FILE *fp, long pc, long *result, int *segOut, int *fileOut,
               BOOLEAN *needsReloc, int phase,
               int *shiftOut, long *unshiftedOut);

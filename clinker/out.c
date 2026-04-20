@@ -23,6 +23,10 @@
 
 #include "clinker.h"
 
+/* Output file writer — only runs after passes 1+2 complete, so isolating
+ * it into its own OUT load segment keeps it out of the root code bank. */
+segment "OUT";
+
 /* ── Body size calculation ─────────────────────────────────────────────── */
 
 /*

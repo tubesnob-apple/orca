@@ -12,12 +12,15 @@
 **************************************************************/
 
 #pragma optimize 9
-#pragma segment "LINFO"
 
 #include "clinker.h"
 #include <shell.h>
 #include <gsos.h>
 #include <orca.h>
+
+/* All code in this file lives in its own LINFO load segment — called
+ * once at startup, no reason to weigh down the root code bank. */
+segment "LINFO";
 
 /* Fields consumed from LangInfo:
  *   sFile    - space-joined input filenames (no extensions;
@@ -39,13 +42,11 @@
 #define LINFO_ISTR_MAX   256
 
 /* Flag bit masks - from linker.asm:81-88 */
-#define LNK_FLAG_B  0x40000000UL  /* +B: bank org */
 #define LNK_FLAG_C  0x20000000UL  /* -C: no compact */
 #define LNK_FLAG_L  0x00100000UL  /* +L: list segments */
 #define LNK_FLAG_M  0x00080000UL  /* +M: memory-only */
 #define LNK_FLAG_P  0x00010000UL  /* -P: no progress */
 #define LNK_FLAG_S  0x00002000UL  /* +S: list symbols */
-#define LNK_FLAG_W  0x00000200UL  /* +W: pause on error */
 #define LNK_FLAG_X  0x00000100UL  /* -X: no expressload */
 
 /* Colon -> slash on GS/OS-style paths, in place. */
@@ -206,9 +207,7 @@ if (dLen) {
 
 if (pb.pFlags & LNK_FLAG_L) opt_list     = TRUE;
 if (pb.pFlags & LNK_FLAG_S) opt_symbols  = TRUE;
-if (pb.pFlags & LNK_FLAG_W) opt_pause    = TRUE;
 if (pb.pFlags & LNK_FLAG_M) opt_memory   = TRUE;
-if (pb.pFlags & LNK_FLAG_B) opt_bankorg  = TRUE;
 if (pb.mFlags & LNK_FLAG_X) opt_express  = FALSE;
 if (pb.mFlags & LNK_FLAG_C) opt_compact  = FALSE;
 if (pb.mFlags & LNK_FLAG_P) opt_progress = FALSE;

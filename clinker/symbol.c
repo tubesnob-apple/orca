@@ -12,6 +12,8 @@
 
 #include "clinker.h"
 
+segment "SYMBOL";
+
 Symbol **symHash = NULL;
 
 /* Allocate and zero the hash table. Called once from main before

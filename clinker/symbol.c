@@ -112,6 +112,16 @@ if ((s->flags & SYM_IS_GLOBAL) && !(flags & SYM_IS_GLOBAL)) {
     s->flags |= flags;
     return s;
     }
+/* First-wins for segment-name symbols. Each input file that has a
+ * private autogen segment (e.g. ~GLOBALS, ~ARRAYS) defines a
+ * segment-name symbol at its own baseOffset within the merged output
+ * segment. Stock resolves EXPR references to the first-defined entry
+ * (main.a's at offset 0); last-wins would overwrite with vroot.a's at
+ * offset 0x200F and corrupt every (~GLOBALS>>8) bank-setup patch. */
+if ((s->flags & SYM_IS_SEGMENT) && (flags & SYM_IS_SEGMENT)) {
+    s->flags |= flags;
+    return s;
+    }
 s->value  = value;
 s->segNum = segNum;
 s->flags |= flags;

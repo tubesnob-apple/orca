@@ -487,9 +487,7 @@ for (;;) {
          * record type defined them. */
         char name[NAME_MAX];
         Symbol *sym;
-        char *p;
         OmfReadPString(fp, name, NAME_MAX);
-        for (p = name; *p; p++) *p = (char)toupper(*p);
         fseek(fp, 4, SEEK_CUR);  /* skip 4 bytes of attrs */
         sym = SymFind(name);
         if (sym && (sym->flags & SYM_PASS1_REQUESTED) &&
@@ -499,9 +497,7 @@ for (;;) {
     else if (op == OP_GEQU || op == OP_EQU) {
         char name[NAME_MAX];
         Symbol *sym;
-        char *p;
         OmfReadPString(fp, name, NAME_MAX);
-        for (p = name; *p; p++) *p = (char)toupper(*p);
         fseek(fp, 4, SEEK_CUR);  /* skip attrs */
         SkipExpr(fp, EXPR_PHASE_COLLECT);
         sym = SymFind(name);
@@ -529,14 +525,12 @@ for (;;) {
          * If a requested symbol matches this name, the segment
          * satisfies the request — pull it. */
         char   name[NAME_MAX];
-        char  *p;
         word   reserved;
         dword  value;
         Symbol *sym;
         OmfReadWord(fp, &reserved);
         OmfReadDword(fp, &value);
         OmfReadPString(fp, name, NAME_MAX);
-        for (p = name; *p; p++) *p = (char)toupper(*p);
         sym = SymFind(name);
         if (sym && (sym->flags & SYM_PASS1_REQUESTED) &&
                    !(sym->flags & SYM_PASS1_RESOLVED))

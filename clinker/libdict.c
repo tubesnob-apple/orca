@@ -129,8 +129,11 @@ for (i = 0; i < entryCount; i++) {
     e = &lf->syms[lf->numSyms];
     n = nLen;
     if (n >= NAME_MAX) n = NAME_MAX - 1;
+    /* Store raw case — ORCA/M's Match is case-sensitive, so dict
+     * entries must preserve original case to collate with mixed-case
+     * references (see symbol.c SymHash comment). */
     for (j = 0; j < n; j++)
-        e->name[j] = (char)toupper(symNames[nameDisp + 1 + j]);
+        e->name[j] = (char)symNames[nameDisp + 1 + j];
     e->name[n]    = 0;
     e->segOffset  = (long)segDisp;
     e->fileNum    = (int)fileNum;

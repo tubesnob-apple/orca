@@ -39,40 +39,27 @@ for (i = 0; i < SYM_HASH_SIZE; i++)
 LibFile *currentRequestLib     = NULL;
 int      currentRequestFileNum = 0;
 
+/* Stock ORCA/M's Match (symbol.asm:1050) is byte-for-byte — case
+ * sensitive. ORCA input files use consistent case between definition
+ * and reference, so case-sensitive matching works; case-folding here
+ * collapses distinct symbols like ~leftJustify ($CBEF) and
+ * ~LeftJustify ($D537) into one entry and silently resolves the
+ * reference to the wrong address. Match stock exactly. */
 unsigned int SymHash(const char *name)
 {
 unsigned int h = 0;
 while (*name)
-    h = h * 31 + (unsigned char)toupper(*name++);
+    h = h * 31 + (unsigned char)*name++;
 return h % SYM_HASH_SIZE;
-}
-
-/* Copy `src` into `dst` uppercased, NUL-terminated, capped at
- * NAME_MAX-1 bytes. Used to derive the hash/compare key from any
- * caller-supplied (possibly mixed-case) symbol name. */
-static void UcaseCopy(char *dst, const char *src)
-{
-int i;
-for (i = 0; i < NAME_MAX - 1 && src[i]; i++)
-    dst[i] = (char)toupper((int)src[i]);
-dst[i] = 0;
 }
 
 Symbol *SymFind(const char *name)
 {
 Symbol *s;
-char upper[NAME_MAX];
-unsigned int h;
+unsigned int h = SymHash(name);
 
-/* Uppercase the caller's name so we match stored-uppercase `name`
- * entries regardless of caller case. Stock ORCA/M is case-insensitive;
- * clinker has been de facto insensitive only because every caller
- * uppercased before lookup. Centralising the toupper here lets callers
- * hand us original-case names (needed for SymDefine's displayName). */
-UcaseCopy(upper, name);
-h = SymHash(upper);
 for (s = symHash[h]; s; s = s->next)
-    if (strcmp(s->name, upper) == 0)
+    if (strcmp(s->name, name) == 0)
         return s;
 return NULL;
 }
@@ -81,21 +68,15 @@ Symbol *SymDefine(const char *name, long value, int segNum, int flags)
 {
 Symbol *s;
 unsigned int h;
-char upper[NAME_MAX];
 
-UcaseCopy(upper, name);
-s = SymFind(upper);
+s = SymFind(name);
 if (!s) {
     s = (Symbol *)malloc(sizeof(Symbol));
     if (!s) FatalError("out of memory (symbol table)");
     memset(s, 0, sizeof(Symbol));
-    strncpy(s->name,        upper, NAME_MAX - 1);
-    /* Preserve the caller's original case for +S output. First-define
-     * wins: subsequent redefines (LOCAL overwritten by GLOBAL or vice
-     * versa) keep the name as the first caller wrote it — which is
-     * what a human grepping kernel listings expects. */
-    strncpy(s->displayName, name,  NAME_MAX - 1);
-    h = SymHash(upper);
+    strncpy(s->name,        name, NAME_MAX - 1);
+    strncpy(s->displayName, name, NAME_MAX - 1);
+    h = SymHash(name);
     s->next = symHash[h];
     symHash[h] = s;
     }
@@ -168,17 +149,15 @@ symListTail = e;
 void SymRequest(const char *name, int pass)
 {
 Symbol *s;
-char upper[NAME_MAX];
 
-UcaseCopy(upper, name);
-s = SymFind(upper);
+s = SymFind(name);
 if (!s) {
     s = (Symbol *)malloc(sizeof(Symbol));
     if (!s) FatalError("out of memory (symbol table)");
     memset(s, 0, sizeof(Symbol));
-    strncpy(s->name,        upper, NAME_MAX - 1);
-    strncpy(s->displayName, name,  NAME_MAX - 1);
-    unsigned int h = SymHash(upper);
+    strncpy(s->name,        name, NAME_MAX - 1);
+    strncpy(s->displayName, name, NAME_MAX - 1);
+    unsigned int h = SymHash(name);
     s->next = symHash[h];
     symHash[h] = s;
     }

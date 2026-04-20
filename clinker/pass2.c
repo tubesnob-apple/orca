@@ -357,7 +357,18 @@ for (;;) {
         base = (long)disp;
         EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc,
                  EXPR_PHASE_RESOLVE, NULL, NULL);
-        result -= base;  /* relative displacement */
+        /* PC-relative displacement: the stored value is
+         *   expression_value - (patch_address + base)
+         * where `pc` is the merged-output offset of the patch location
+         * and `base` (from the record) is how many bytes past the patch
+         * the branch returns to — typically equal to pLen for branch
+         * instructions. Subtracting just `base` here left the
+         * merged-segment absolute offset of the target in the low
+         * bytes, which produced wildly wrong branch displacements
+         * (e.g. BPL 0x29 instead of 0x01 in kern's kern_printf).
+         * Verified against stock: expression_value=0x132A, pc=0x1328,
+         * base=1 → result = 0x132A - 0x1329 = 1. */
+        result -= (pc + base);
         for (i = 0; i < pLen && i < 4; i++)
             buf[i] = (byte)(result >> (i * 8));
         EmitData(out, buf, (long)pLen);

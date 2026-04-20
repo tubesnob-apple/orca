@@ -392,8 +392,19 @@ if (!lf->fp) {
     numErrors++;
     return FALSE;
     }
-lf->next = libFiles;
-libFiles = lf;
+/* Append to match stock's file-list iteration order. Stock's NextFile
+ * walks libraries in the order they're added to its file list (which
+ * mirrors the prefix-13 directory enumeration or the command-line
+ * `lib=` order). Prepending put clinker's libFiles in reverse, which
+ * perturbed every library-symbol's merged offset vs stock. */
+lf->next = NULL;
+if (!libFiles) {
+    libFiles = lf;
+    } else {
+    LibFile *t;
+    for (t = libFiles; t->next; t = t->next) /* walk to tail */ ;
+    t->next = lf;
+    }
 return TRUE;
 }
 

@@ -235,6 +235,7 @@ typedef struct LibSymEntry {
     char    name[NAME_MAX];  /* uppercase symbol name */
     long    segOffset;       /* file offset of the defining segment's header */
     int     fileNum;         /* MakeLib-internal file number (1..N) */
+    int     dictSeq;         /* position in the dict's original MakeLib order */
     BOOLEAN isPrivate;       /* private_flag = 1 in the dictionary */
 } LibSymEntry;
 
@@ -246,7 +247,8 @@ typedef struct LibFile {
     /* Library-dictionary cache. Lazily initialised on first lookup.
      * dictLoaded is set unconditionally so we don't re-scan on miss;
      * dictValid is set only if a KIND=$08 segment was actually parsed. */
-    LibSymEntry    *syms;
+    LibSymEntry    *syms;        /* sorted alphabetically for bsearch */
+    int            *dictOrder;   /* maps dict-seq → index into syms[] */
     int             numSyms;
     BOOLEAN         dictLoaded;
     BOOLEAN         dictValid;
@@ -323,6 +325,10 @@ long LibDictFind(LibFile *lf, const char *name);  /* -1 on miss */
  * generated private names like `~0001buf` recur across source files. */
 const LibSymEntry *LibDictLookup(LibFile *lf, const char *name);
 const LibSymEntry *LibDictNext(LibFile *lf, const LibSymEntry *cur);
+/* LibDictAtSeq: get the dict's k-th entry in MakeLib-original order
+ * (not alphabetical). Used by LibrarySearch to pull segments in the
+ * same sequence stock's NextLibrarySeg does. Returns NULL past end. */
+const LibSymEntry *LibDictAtSeq(LibFile *lf, int seq);
 
 /* Set by pass1 while it processes a library-sourced segment.  SymRequest
  * reads these to tag new symbol requests with their originating library

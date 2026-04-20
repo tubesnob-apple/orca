@@ -108,7 +108,15 @@ if (opcode == OP_GLOBAL || opcode == OP_GEQU)
     symFlags |= SYM_IS_GLOBAL;
 
 if (opcode == OP_GLOBAL || opcode == OP_LOCAL) {
-    value = pc;
+    /* pc is the input-local offset. Translate to merged-output offset
+     * by adding seg->baseOffset so the symbol's value is the same
+     * coordinate system as OP_ENTRY and segName symbols elsewhere in
+     * pass1. Without this, any LOCAL/GLOBAL in a non-first contributor
+     * to its output segment gets sym->value short by baseOffset, and
+     * pass2's EXPR evaluator writes the wrong LCONST / RELOC value
+     * for every reference → loader patches to the wrong address →
+     * kernel crashes at first indirect call. */
+    value = pc + seg->baseOffset;
     } else {
     /* EQU / GEQU: expression follows. Track segOut from the
      * expression evaluator — an EQU whose RHS is a cross-segment
@@ -302,6 +310,13 @@ OutSeg *out;
 out = FindOrCreateOutSeg(seg->loadName, seg->segName, seg->segkind);
 seg->outSegNum  = out->segNum;
 seg->baseOffset = out->length;
+
+/* Seed SegDisp ($87) anchor for any EQU/GEQU expressions evaluated
+ * during MeasureBody. Without this, pass-1 evaluation of an EQU whose
+ * RHS is `SegDisp N` yields N (input-local) instead of baseOffset+N,
+ * leaving the EQU symbol with a value short by baseOffset. Pass2Seg
+ * re-seeds this for the same reason before its own body walk. */
+exprSegStartPc = seg->baseOffset;
 
 /* Register segment name as a symbol (always define; may already exist
  * from SymRequest before this segment was processed) */
@@ -617,50 +632,53 @@ if (!libFiles) return;
  * handled by the legacy full-rescan below. */
 for (lf = libFiles; lf; lf = lf->next) LibDictInit(lf);
 
+/* Match stock ORCA/M linker's NextLibrarySeg iteration (seg.asm:644):
+ *
+ *   for each library (in link-command order):
+ *       for each dict entry (in MakeLib-original order):
+ *           if that entry's symbol is currently requested but unresolved:
+ *               pull the defining segment
+ *       if we pulled any segment from this lib, restart its dict scan
+ *   if we pulled any segment from any lib, restart the whole outer loop
+ *
+ * The dict-order iteration is what makes the merged output layout match
+ * stock. The previous implementation iterated clinker's symbol HASH
+ * table (bucket-then-chain order), which scrambled library-pull order
+ * and placed every pulled library segment at a different merged offset
+ * than stock — cascading into ~5K cross-linker byte differences in
+ * seg 4's library region. See LibDictAtSeq. */
 do {
     changed = FALSE;
-
-    for (i = 0; i < SYM_HASH_SIZE; i++) {
-        for (sym = symHash[i]; sym; sym = sym->next) {
-            if (!(sym->flags & SYM_PASS1_REQUESTED)) continue;
-            /* Only SKIP resolution if the symbol is resolved AND globally
-             * visible. A LOCAL-only def (from e.g. a compiler-mangled
-             * helper name used inside a pulled library segment) must
-             * NOT prevent LibrarySearch from finding the real GLOBAL
-             * export of the same name in another library. Stock iix
-             * link handles this via per-file private symbol tables;
-             * clinker's flat hash makes every def globally visible, so
-             * we gate skip on SYM_IS_GLOBAL to prevent a pulled-LOCAL
-             * from hiding a needed public symbol. */
-            if ((sym->flags & SYM_PASS1_RESOLVED) &&
-                (sym->flags & SYM_IS_GLOBAL))
-                continue;
-            for (lf = libFiles; lf; lf = lf->next) {
-                const LibSymEntry *e;
-                BOOLEAN pulled = FALSE;
-                if (!lf->dictValid) continue;  /* legacy path covers these */
-                /* Walk every same-name dict entry — duplicates exist for
-                 * compiler-mangled private names like `~0001buf` (one
-                 * per source file in the library). Picking only the
-                 * leftmost match would miss the correct file-scoped
-                 * entry for other requesters. */
-                for (e = LibDictLookup(lf, sym->name); e; e = LibDictNext(lf, e)) {
-                    /* Public dict entries always match. Private entries
-                     * match only when the request came from within the
-                     * SAME MakeLib-internal file as the entry (iix's
-                     * per-file scoping rule). */
-                    if (e->isPrivate) {
-                        if (sym->reqLib != lf)              continue;
-                        if (sym->reqFileNum != e->fileNum)  continue;
-                        }
-                    PullLibSegment(lf, e->segOffset, e->fileNum, &libFileSeq);
-                    changed = TRUE;
-                    pulled = TRUE;
-                    break;
+    for (lf = libFiles; lf; lf = lf->next) {
+        BOOLEAN pulled_from_this_lib;
+        if (!lf->dictValid) continue;      /* legacy path covers these */
+        do {
+            pulled_from_this_lib = FALSE;
+            for (i = 0; i < lf->numSyms; i++) {
+                const LibSymEntry *e = LibDictAtSeq(lf, i);
+                if (!e) break;
+                sym = SymFind(e->name);
+                if (!sym) continue;
+                if (!(sym->flags & SYM_PASS1_REQUESTED)) continue;
+                /* Skip only if resolved AND globally visible — see note
+                 * in the old hash-iteration code about LOCAL/GLOBAL
+                 * shadowing in clinker's flat hash table. */
+                if ((sym->flags & SYM_PASS1_RESOLVED) &&
+                    (sym->flags & SYM_IS_GLOBAL))
+                    continue;
+                /* Public dict entries always satisfy the request. Private
+                 * entries match only when the request came from within
+                 * the SAME MakeLib-internal file as the dict entry (iix's
+                 * per-file scoping rule). */
+                if (e->isPrivate) {
+                    if (sym->reqLib != lf)             continue;
+                    if (sym->reqFileNum != e->fileNum) continue;
                     }
-                if (pulled) break;    /* first library wins */
+                PullLibSegment(lf, e->segOffset, e->fileNum, &libFileSeq);
+                pulled_from_this_lib = TRUE;
+                changed = TRUE;
                 }
-            }
+            } while (pulled_from_this_lib);
         }
     } while (changed);
 

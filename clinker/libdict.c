@@ -134,12 +134,27 @@ for (i = 0; i < entryCount; i++) {
     e->name[n]    = 0;
     e->segOffset  = (long)segDisp;
     e->fileNum    = (int)fileNum;
+    e->dictSeq    = lf->numSyms;   /* original dict position */
     e->isPrivate  = (privFlag != 0);
     lf->numSyms++;
     }
 
 /* Sort for binary-search lookup. */
 qsort(lf->syms, (size_t)lf->numSyms, sizeof(LibSymEntry), CmpSymEntry);
+
+/* Build dictOrder[]: after qsort scrambles the entries, dictOrder[k] tells
+ * us which sorted-array index was originally at dict position k. Iterating
+ * dictOrder[0..numSyms-1] gives entries in MakeLib-dict order, which
+ * matches stock's NextLibrarySeg iteration order and keeps library-pull
+ * sequencing in sync between the two linkers. */
+{
+int k;
+lf->dictOrder = (int *)malloc((size_t)lf->numSyms * sizeof(int));
+if (!lf->dictOrder) goto done;
+for (k = 0; k < lf->numSyms; k++)
+    lf->dictOrder[lf->syms[k].dictSeq] = k;
+}
+
 ok = 1;
 
 done:
@@ -269,4 +284,17 @@ idx = (int)(cur - lf->syms);
 if (idx < 0 || idx >= lf->numSyms - 1) return NULL;
 if (strcmp(lf->syms[idx + 1].name, cur->name) != 0) return NULL;
 return &lf->syms[idx + 1];
+}
+
+/* Iterate the dict in MakeLib's original order (not alphabetical).
+ * Stock's NextLibrarySeg (seg.asm:644) walks dict entries in this order
+ * and pulls each segment the first time a dict entry resolves a
+ * currently-unresolved symbol — producing a deterministic merge layout.
+ * Clinker matches that by iterating dictOrder[] here. Returns NULL past
+ * the end. */
+const LibSymEntry *LibDictAtSeq(LibFile *lf, int seq)
+{
+if (!lf || !lf->dictValid)      return NULL;
+if (seq < 0 || seq >= lf->numSyms) return NULL;
+return &lf->syms[lf->dictOrder[seq]];
 }

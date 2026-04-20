@@ -16,6 +16,10 @@ segment "SYMBOL";
 
 Symbol **symHash = NULL;
 
+/* +S listing store — append-only. See clinker.h SymListEntry comment. */
+SymListEntry *symList = NULL;
+static SymListEntry *symListTail = NULL;
+
 /* Allocate and zero the hash table. Called once from main before
  * any symbol-table operation. Moving this ~4KB allocation out of
  * ~_ROOT and onto the heap keeps the data bank under 64KB. */
@@ -127,6 +131,30 @@ if (s && s->value == value && s->segNum == segNum)
 return s;
 }
 
+void SymAddListEntry(const char *displayName, long value, int segNum,
+                     int dataArea, int flags)
+{
+SymListEntry *e;
+
+e = (SymListEntry *)malloc(sizeof(SymListEntry));
+if (!e) FatalError("out of memory (SymListEntry)");
+
+strncpy(e->displayName, displayName, NAME_MAX - 1);
+e->displayName[NAME_MAX - 1] = 0;
+e->value    = value;
+e->segNum   = segNum;
+e->dataArea = dataArea;
+e->flags    = flags;
+e->next     = NULL;
+
+if (!symList) {
+    symList = e;
+} else {
+    symListTail->next = e;
+    }
+symListTail = e;
+}
+
 void SymRequest(const char *name, int pass)
 {
 Symbol *s;
@@ -161,10 +189,10 @@ if (!s->reqLib && currentRequestLib) {
 
 /* qsort comparator: by displayName so the +S listing sorts in the
  * same mixed-case order stock's symAlpha chain produces. */
-static int CmpSymByName(const void *a, const void *b)
+static int CmpListByName(const void *a, const void *b)
 {
-Symbol *const *sa = (Symbol *const *)a;
-Symbol *const *sb = (Symbol *const *)b;
+SymListEntry *const *sa = (SymListEntry *const *)a;
+SymListEntry *const *sb = (SymListEntry *const *)b;
 return strcmp((*sa)->displayName, (*sb)->displayName);
 }
 
@@ -189,29 +217,22 @@ return strcmp((*sa)->displayName, (*sb)->displayName);
  * too so the listing shows only symbols that actually have a definition. */
 void SymDump(void)
 {
-Symbol **arr;
-Symbol  *s;
-int      i, n, count;
-int      col2 = 0;
+SymListEntry **arr;
+SymListEntry  *e;
+int            i, n, count;
+int            col2 = 0;
 
-/* Collect all resolved symbols (segment names included — stock's
- * PrintSymbols lists them too). */
 count = 0;
-for (i = 0; i < SYM_HASH_SIZE; i++)
-    for (s = symHash[i]; s; s = s->next)
-        if (s->flags & SYM_PASS1_RESOLVED)
-            count++;
+for (e = symList; e; e = e->next) count++;
+if (count == 0) return;
 
-arr = (Symbol **)malloc((size_t)count * sizeof(Symbol *));
+arr = (SymListEntry **)malloc((size_t)count * sizeof(SymListEntry *));
 if (!arr) { FatalError("out of memory (SymDump)"); return; }
 
 n = 0;
-for (i = 0; i < SYM_HASH_SIZE; i++)
-    for (s = symHash[i]; s; s = s->next)
-        if (s->flags & SYM_PASS1_RESOLVED)
-            arr[n++] = s;
+for (e = symList; e; e = e->next) arr[n++] = e;
 
-qsort(arr, (size_t)n, sizeof(Symbol *), CmpSymByName);
+qsort(arr, (size_t)n, sizeof(SymListEntry *), CmpListByName);
 
 puts("");
 puts("Global symbol table:");
@@ -224,8 +245,7 @@ for (i = 0; i < n; i++) {
      * adjustment gsplus.c:PostExprSegNum does. */
     int segOut = opt_express ? (arr[i]->segNum + 1) : arr[i]->segNum;
     char flag  = (arr[i]->flags & SEGKIND_PRIVATE) ? 'P' : 'G';
-    const char *nm = arr[i]->displayName[0] ? arr[i]->displayName
-                                            : arr[i]->name;
+    const char *nm = arr[i]->displayName;
     int nameLen = (int)strlen(nm);
     int pad;
 

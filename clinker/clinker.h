@@ -145,10 +145,6 @@ typedef struct OutSeg {
     int   segNum;             /* output segment number */
     word  segType;            /* low 5 bits of KIND (enum-style type) */
     word  kind;                /* full 16-bit KIND word: type + flags */
-    int   lastDataArea;       /* running data-area counter — stock's
-                               * seg.asm lastDataNumber. Incremented for
-                               * each DATA-kind input segment that gets
-                               * merged in; reset to 0 per output seg. */
     long  length;             /* total byte length of combined data */
     long  org;                /* origin address (usually 0) */
     long  banksize;           /* bank size (usually $10000) */
@@ -273,6 +269,26 @@ extern int        numOutSegs;
 extern Symbol   **symHash;      /* allocated by SymInit() */
 void SymInit(void);
 
+/* Link-wide data-area counter. Matches stock seg.asm's lastDataNumber —
+ * bumped once per DATA-kind input segment (merged or not) during pass 1,
+ * never reset. Symbols defined inside a DATA seg record the current
+ * value; code-seg symbols and GLOBAL/GEQU/ENTRY symbols record 0. */
+extern int        lastDataNumber;
+
+/* +S listing: every define (segment name, GLOBAL, LOCAL, GEQU, EQU,
+ * ENTRY) appends one SymListEntry here. Kept separate from the hash
+ * table so the listing can show all per-file duplicates (~GLOBALS,
+ * ~ARRAYS, ~_ROOT etc.) that the hash de-dupes by name. */
+typedef struct SymListEntry {
+    char  displayName[NAME_MAX]; /* original case */
+    long  value;
+    int   segNum;
+    int   dataArea;
+    int   flags;                 /* SEGKIND_PRIVATE for G/P column */
+    struct SymListEntry *next;
+} SymListEntry;
+extern SymListEntry *symList;
+
 /* GSplus signature */
 extern dword     sfSig;         /* 32-bit link signature */
 
@@ -287,6 +303,11 @@ Symbol *SymDefine(const char *name, long value, int segNum, int flags);
  * number. Used by DefineFromRecord for GLOBAL/LOCAL/EQU/GEQU defs. */
 Symbol *SymDefineData(const char *name, long value, int segNum,
                       int flags, int dataArea);
+/* SymAddListEntry: append one entry to the +S listing. Call once per
+ * define (segname, GLOBAL, LOCAL, GEQU, EQU, ENTRY). Decoupled from
+ * the hash table so per-file duplicates are all retained for +S. */
+void    SymAddListEntry(const char *displayName, long value, int segNum,
+                        int dataArea, int flags);
 void    SymRequest(const char *name, int pass);
 void    SymDump(void);
 unsigned int SymHash(const char *name);

@@ -87,6 +87,8 @@ int     symFlags;
 long    value;
 BOOLEAN needsReloc;
 int     segOut, fileOut;
+int     listDataArea;
+int     isGlobal;
 
 /* Pass the original-case name to SymDefine — it uppercases internally
  * for its hash/compare key but preserves the original in displayName
@@ -106,8 +108,8 @@ segOut = seg->outSegNum;
  * earlier GLOBAL in our flat symbol table, cross-file references
  * resolve to the wrong segment. Flag GLOBAL symbols so SymDefine can
  * reject downgrade attempts. */
-if (opcode == OP_GLOBAL || opcode == OP_GEQU)
-    symFlags |= SYM_IS_GLOBAL;
+isGlobal = (opcode == OP_GLOBAL || opcode == OP_GEQU);
+if (isGlobal) symFlags |= SYM_IS_GLOBAL;
 
 if (opcode == OP_GLOBAL || opcode == OP_LOCAL) {
     /* pc is the input-local offset. Translate to merged-output offset
@@ -136,7 +138,14 @@ if (opcode == OP_GLOBAL || opcode == OP_LOCAL) {
         }
     }
 
-SymDefineData(name, value, segOut, symFlags, dataArea);
+/* +S listing rule (stock symbol.asm:374-381): GLOBAL and GEQU record
+ * dataArea 0 regardless of what segment they appear in; LOCAL and EQU
+ * record the segment's dataArea (0 for code segs, non-zero for data). */
+listDataArea = isGlobal ? 0 : dataArea;
+SymDefineData(name, value, segOut, symFlags, listDataArea);
+/* SymDump applies the ExpressLoad +1 remap when it prints, so pass the
+ * raw (pre-remap) segNum here. */
+SymAddListEntry(name, value, segOut, listDataArea, symFlags);
 }
 
 /* ----------------------------------------------------------
@@ -235,11 +244,17 @@ for (;;) {
         OmfReadWord(fp, &reserved);
         OmfReadDword(fp, &value);
         OmfReadPString(fp, name, NAME_MAX);
-        /* SymDefine preserves original case in displayName for +S. */
-        if (name[0])
-            SymDefineData(name, seg->baseOffset + (long)value,
-                          seg->outSegNum,
-                          SYM_PASS1_RESOLVED | SYM_IS_GLOBAL, dataArea);
+        /* SymDefine preserves original case in displayName for +S.
+         * ENTRY is global — stock's Define rule stores dataArea=0 for
+         * global non-segment symbols, so always 0 here regardless of
+         * the enclosing seg's data-area. */
+        if (name[0]) {
+            long entryVal = seg->baseOffset + (long)value;
+            SymDefineData(name, entryVal, seg->outSegNum,
+                          SYM_PASS1_RESOLVED | SYM_IS_GLOBAL, 0);
+            SymAddListEntry(name, entryVal, seg->outSegNum, 0,
+                            SYM_PASS1_RESOLVED | SYM_IS_GLOBAL);
+            }
         }
     else if (op == OP_RELOC) {
         /* pLen(1) shift(1) pc(4) value(4) = 10 more bytes */
@@ -322,13 +337,13 @@ if (opt_gsplus && out == outSegs && out->length == 0)
     out->length = 8;
 
 /* Assign data-area number for DATA-kind input segments. Stock's
- * seg.asm:1156 increments lastDataNumber per DATA input seg and
- * attaches it to every LOCAL/GLOBAL defined inside that seg. Needed
- * so +S output shows the same data-area column stock does (e.g.
- * ADBData in segment 4 data-area 1C). */
+ * seg.asm:1156 bumps lastDataNumber per DATA input seg — counter is
+ * link-wide (not per-output-seg), which is why ~STRLEN in the output
+ * shows data-area 24 even though it's the first data seg for *its*
+ * output seg. Mirror that by making lastDataNumber a global. */
 if ((seg->segkind & 0x1F) == SEGTYPE_DATA) {
-    out->lastDataArea++;
-    dataArea = out->lastDataArea;
+    lastDataNumber++;
+    dataArea = lastDataNumber;
     }
 
 seg->outSegNum  = out->segNum;
@@ -345,12 +360,16 @@ exprSegStartPc = seg->baseOffset;
  * from SymRequest before this segment was processed). Propagate the
  * segment's PRIVATE kind bit into the symbol so +S output prints `P`
  * for segment-name symbols in private segments (e.g. CalcBankCH), as
- * stock does. */
+ * stock does. Segment-name symbols are GLOBAL in stock's rule set,
+ * with isData=1 only for DATA-kind segs — so the +S listing records
+ * dataArea = (segType==DATA ? lastDataNumber : 0). */
 if (seg->segName[0]) {
     int segFlags = SYM_PASS1_RESOLVED | SYM_IS_SEGMENT | SYM_IS_GLOBAL;
     if (seg->segkind & SEGKIND_PRIVATE)
         segFlags |= SEGKIND_PRIVATE;
     SymDefine(seg->segName, seg->baseOffset, out->segNum, segFlags);
+    SymAddListEntry(seg->segName, seg->baseOffset, out->segNum,
+                    dataArea, segFlags);
     }
 
 measured = MeasureBody(inf->fp, seg, dataArea);

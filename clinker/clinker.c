@@ -48,6 +48,7 @@ LibFile   *libFiles   = NULL;
 OutSeg    *outSegs    = NULL;
 int        numOutSegs = 0;
 dword      sfSig      = 0;
+int        lastDataNumber = 0;  /* link-wide data-area counter */
 
 /* ----------------------------------------------------------
    Error reporting

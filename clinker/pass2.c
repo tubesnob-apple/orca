@@ -529,14 +529,6 @@ for (out = outSegs; out; out = out->next) {
         }
     }
 
-/* The gsplusSymbols=1 flag used to inject an 8-byte WDM-trap
- * prologue (42 0F 80 04 <sfSig-LE>) at the head of the first
- * output segment so the GSplus emulator could bind a running image
- * to its .symbols sidecar on the first instruction fetch. That
- * behaviour has been removed by request — the flag now only emits
- * the .symbols / .sym65 sidecars; the binary is byte-identical
- * with and without it. */
-
 /* Process each input segment */
 for (inf = inputFiles; inf; inf = inf->next) {
     for (seg = inf->segs; seg; seg = seg->next) {
@@ -545,6 +537,57 @@ for (inf = inputFiles; inf; inf = inf->next) {
         if (opt_progress)
             printf("Pass 2: %s / %s\n", inf->name, seg->segName);
         Pass2Seg(inf, seg, out);
+        }
+    }
+
+/* GSplus symbol-binding footer. After pass 2 has written every
+ * byte the inputs contribute, append a 26-byte trailer to each
+ * CODE output segment's LCONST:
+ *
+ *   bytes 0..16  "__GSPLUSSYMBOLS__"  (17-byte ASCII magic)
+ *   bytes 17..20 sfSig                (little-endian 32-bit, matches
+ *                                      the .symbols JSON "symsig" field)
+ *   bytes 21..24 total LCONST length  (little-endian 32-bit, includes
+ *                                      this footer — so GSplus can back-
+ *                                      compute seg_base = marker_end -
+ *                                      length)
+ *   byte  25     segNum               (pre-ExpressLoad-remap segment
+ *                                      number, 1..N; matches the
+ *                                      symbols[].segment field in the
+ *                                      .symbols JSON so a scanner can
+ *                                      pick the right symbol subset
+ *                                      for this segment)
+ *
+ * GSplus scans emulator RAM for the magic string, reads the sfSig
+ * to pick a matching .symbols file, uses the stored length to find
+ * the segment base, and uses segNum to filter the JSON's symbols[]
+ * to those belonging to this segment.
+ *
+ * Footers are emitted ONLY for segType == 0x00 (code, static).
+ * Non-code segment kinds — direct-page/stack (0x12), data areas
+ * (0x01), path (0x04), and so on — have layouts or live sizes that
+ * the runtime depends on exactly, and appending bytes to them
+ * breaks things (confirmed: kernel ~_STACK at type 0x12 crashed
+ * when a footer was emitted there). */
+if (opt_gsplus) {
+    static const char magic[17] = "__GSPLUSSYMBOLS__";
+    for (out = outSegs; out; out = out->next) {
+        byte footer[26];
+        long total;
+        int  i;
+        if ((out->segType & 0x1F) != 0x00) continue;   /* CODE only */
+        total = out->dataLen + 26;
+        for (i = 0; i < 17; i++) footer[i] = (byte)magic[i];
+        footer[17] = (byte)(sfSig);
+        footer[18] = (byte)(sfSig >> 8);
+        footer[19] = (byte)(sfSig >> 16);
+        footer[20] = (byte)(sfSig >> 24);
+        footer[21] = (byte)(total);
+        footer[22] = (byte)(total >> 8);
+        footer[23] = (byte)(total >> 16);
+        footer[24] = (byte)(total >> 24);
+        footer[25] = (byte)(out->segNum);
+        EmitData(out, footer, 26L);
         }
     }
 

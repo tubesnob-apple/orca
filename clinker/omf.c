@@ -667,23 +667,38 @@ for (r = seg->relocHead; r; r = r->next) {
 
 void OmfWriteSuper(FILE *fp, OutSeg *seg)
 {
-int        subtype;
-int        n;
-long      *arr;
-RelocRec  *r;
+int       n;
+long     *arr;
+RelocRec *r;
+/* Interleaved emission matching stock's DoCompact (out.asm:957).
+ * Walk the reloc list chronologically. At each record:
+ *   - Unpackable → emit as an individual cRELOC / cINTERSEG / RELOC
+ *     / INTERSEG record.
+ *   - SUPER-packable, first time this subtype appears → open a SUPER
+ *     record here, absorbing every matching later record. Mark the
+ *     subtype as emitted so we skip subsequent members.
+ *   - SUPER-packable, subtype already emitted → skip (was absorbed).
+ * Emitting all SUPER records first (as my previous version did) puts
+ * individual cRELOC / cINTERSEG records AFTER the SUPER block, but
+ * stock interleaves them by first-encounter position. The two orders
+ * are runtime-equivalent but not byte-identical. */
+int emitted[SUPER_SUBTYPE_COUNT];
+int i;
 
-for (subtype = 0; subtype < SUPER_SUBTYPE_COUNT; subtype++) {
-    arr = CollectSuperOffsets(seg, subtype, &n);
+for (i = 0; i < SUPER_SUBTYPE_COUNT; i++) emitted[i] = 0;
+
+for (r = seg->relocHead; r; r = r->next) {
+    int st = ClassifyRelocForSuper(r);
+    if (st < 0) {
+        OmfWriteReloc(fp, r);
+        continue;
+        }
+    if (emitted[st]) continue;
+    emitted[st] = 1;
+    arr = CollectSuperOffsets(seg, st, &n);
     if (n > 0) {
-        EmitSuperStream(fp, subtype, arr, n);
+        EmitSuperStream(fp, st, arr, n);
         free(arr);
         }
     }
-
-/* Anything ClassifyRelocForSuper couldn't pack — non-matching shape,
- * large fileNum, unusual shift — gets emitted individually as
- * cRELOC / RELOC / cINTERSEG / INTERSEG. */
-for (r = seg->relocHead; r; r = r->next)
-    if (ClassifyRelocForSuper(r) < 0)
-        OmfWriteReloc(fp, r);
 }

@@ -318,27 +318,44 @@ for (;;) {
         }
     else if (op == OP_EXPR || op == OP_ZEXPR || op == OP_BEXPR) {
         /* Evaluate the expression and emit pLen bytes into the LCONST
-         * image.  If the result is relocatable, record the reference
+         * image. If the result is relocatable, record the reference
          * value in the RELOC/INTERSEG entry so the loader patches
-         * (segment_base + value). For a shifted expression (e.g.
-         * `FOO >> 16` for bank byte), stock iix link stores the
-         * UNSHIFTED reference in the record + LCONST and tags the
-         * reloc with the shift count, so the loader re-applies the
-         * shift at load time. Match that. */
+         * (segment_base + value).
+         *
+         * Shifted expression (e.g. `FOO >> 16` for bank byte):
+         *  - INTERSEG shifted: LCONST gets unshifted ref, RELOC value
+         *    gets unshifted ref — loader shifts at load time (stock
+         *    pass2.asm:918-920, `move4 shiftValue,expValue` before
+         *    PutValue).
+         *  - Same-seg shifted: LCONST gets the POST-shift result,
+         *    RELOC value gets unshifted ref — stock doesn't rewrite
+         *    expValue in the lb2 branch, so PutValue stores the
+         *    computed shifted value. */
         byte pLen = (byte)OmfReadByte(inf->fp);
         byte buf[4] = {0, 0, 0, 0};
         int  i;
         int  shiftCount = 0;
         long unshifted  = 0;
-        long storeVal;
+        long emitVal, relocVal;
         byte shiftByte;
+        BOOLEAN isInterseg;
         EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc,
                  EXPR_PHASE_RESOLVE, seg->inputFileNum,
                  &shiftCount, &unshifted);
-        storeVal  = (shiftCount != 0) ? unshifted : result;
-        shiftByte = (byte)(shiftCount & 0xFF);
+        shiftByte  = (byte)(shiftCount & 0xFF);
+        isInterseg = (needsReloc && segOut != 0 && segOut != out->segNum);
+
+        if (shiftCount != 0) {
+            relocVal = unshifted;
+            emitVal  = isInterseg ? unshifted : result;
+            }
+        else {
+            relocVal = result;
+            emitVal  = result;
+            }
+
         for (i = 0; i < pLen && i < 4; i++)
-            buf[i] = (byte)(storeVal >> (i * 8));
+            buf[i] = (byte)(emitVal >> (i * 8));
         EmitData(out, buf, (long)pLen);
         if (needsReloc) {
             /* pLen=4 compaction (stock DictReloc symbol.asm:442 +
@@ -351,12 +368,12 @@ for (;;) {
              * INTERSEG1..12 (cross-seg). Only valid for shift==0. */
             byte relocLen = pLen;
             if (pLen == 4 && shiftByte == 0 &&
-                ((storeVal >> 24) & 0xFF) == 0)
+                ((relocVal >> 24) & 0xFF) == 0)
                 relocLen = 3;
-            if (segOut != 0 && segOut != out->segNum)
-                AppendReloc(out, pc, relocLen, shiftByte, storeVal, 1, segOut, 1);
+            if (isInterseg)
+                AppendReloc(out, pc, relocLen, shiftByte, relocVal, 1, segOut, 1);
             else
-                AppendReloc(out, pc, relocLen, shiftByte, storeVal, 0, 0, 0);
+                AppendReloc(out, pc, relocLen, shiftByte, relocVal, 0, 0, 0);
             }
         pc += pLen;
         }
@@ -409,32 +426,43 @@ for (;;) {
                  EXPR_PHASE_RESOLVE, seg->inputFileNum, NULL, NULL);
         }
     else if (op == OP_LEXPR) {
-        /* LEXPR ($F3): patch in outer segment; same layout as EXPR. */
+        /* LEXPR ($F3): patch in outer segment; same layout as EXPR
+         * and same shifted-reloc emit policy. */
         byte pLen = (byte)OmfReadByte(inf->fp);
         byte buf[4] = {0, 0, 0, 0};
         int  i;
         int  shiftCount = 0;
         long unshifted  = 0;
-        long storeVal;
+        long emitVal, relocVal;
         byte shiftByte;
+        BOOLEAN isInterseg;
         EvalExpr(inf->fp, pc, &result, &segOut, &fileOut, &needsReloc,
                  EXPR_PHASE_RESOLVE, seg->inputFileNum,
                  &shiftCount, &unshifted);
-        storeVal  = (shiftCount != 0) ? unshifted : result;
-        shiftByte = (byte)(shiftCount & 0xFF);
+        shiftByte  = (byte)(shiftCount & 0xFF);
+        isInterseg = (needsReloc && segOut != 0 && segOut != out->segNum);
+
+        if (shiftCount != 0) {
+            relocVal = unshifted;
+            emitVal  = isInterseg ? unshifted : result;
+            }
+        else {
+            relocVal = result;
+            emitVal  = result;
+            }
+
         for (i = 0; i < pLen && i < 4; i++)
-            buf[i] = (byte)(storeVal >> (i * 8));
+            buf[i] = (byte)(emitVal >> (i * 8));
         EmitData(out, buf, (long)pLen);
         if (needsReloc) {
-            /* Same pLen=4 → pLen=3 compaction as OP_EXPR above. */
             byte relocLen = pLen;
             if (pLen == 4 && shiftByte == 0 &&
-                ((storeVal >> 24) & 0xFF) == 0)
+                ((relocVal >> 24) & 0xFF) == 0)
                 relocLen = 3;
-            if (segOut != 0 && segOut != out->segNum)
-                AppendReloc(out, pc, relocLen, shiftByte, storeVal, 1, segOut, 1);
+            if (isInterseg)
+                AppendReloc(out, pc, relocLen, shiftByte, relocVal, 1, segOut, 1);
             else
-                AppendReloc(out, pc, relocLen, shiftByte, storeVal, 0, 0, 0);
+                AppendReloc(out, pc, relocLen, shiftByte, relocVal, 0, 0, 0);
             }
         pc += pLen;
         }

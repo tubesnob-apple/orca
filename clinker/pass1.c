@@ -590,6 +590,7 @@ for (;;) {
         inf->fileNum = ++(*seqCounter);
         strncpy(inf->name, lf->path, PATH_MAX - 1);
         inf->segs    = seg;
+        seg->inputFileNum = inf->fileNum;   /* same rationale as PullLibSegment */
 
         if (!inputFiles) inputFiles = inf;
         else             inputTail->next = inf;
@@ -641,6 +642,12 @@ inf->fp      = lf->fp;
 inf->fileNum = ++(*seqCounter);
 strncpy(inf->name, lf->path, PATH_MAX - 1);
 inf->segs    = seg;
+/* Propagate inputFileNum to the pulled seg so private-symbol
+ * scoping in SymDefine uses this library pull's distinct file
+ * identity. Without this, every pulled segment gets fileNum=0
+ * (from memset) and all their private symbol-name defines
+ * collapse into one scope bucket. */
+seg->inputFileNum = inf->fileNum;
 
 if (!inputFiles) inputFiles = inf;
 else             inputTail->next = inf;

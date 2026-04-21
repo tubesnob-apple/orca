@@ -175,17 +175,30 @@ for (;;) {
         Symbol *sym;
         long    v = 0;
         unsigned int r = 0;
+        int     isAttr = (op == 0x84 || op == 0x85 || op == 0x86);
 
         OmfReadPString(fp, name, NAME_MAX);
 
         sym = SymFind(name, fileNum);
         if (!sym || !(sym->flags & SYM_PASS1_RESOLVED)) {
-            /* WEAK resolves to 0 silently; STRONG triggers library
-             * search in pass 1 or link error in pass 2. */
-            if (op != EXPR_WEAK) {
+            /* WEAK and attribute refs silently resolve to 0; STRONG
+             * triggers library search in pass 1 or link error in
+             * pass 2. */
+            if (op != EXPR_WEAK && !isAttr) {
                 if (phase == EXPR_PHASE_COLLECT) SymRequest(name, 1, fileNum);
                 else if (op == EXPR_STRONG) LinkError("undefined symbol", name);
                 }
+            }
+        else if (isAttr) {
+            /* $84 AttrLength / $85 AttrType / $86 AttrCount: stock
+             * pushes `symbolLength` / `symbolType` / `symbolCount`
+             * (exp.asm:874/901/847), always non-relocatable. Clinker
+             * doesn't track those attributes, so push 0. The VALUE
+             * will differ from stock (attribute math like
+             * `L:~str - 1` is 0-1 = -1 vs stock's actual_len-1), but
+             * crucially the reloc flag stays 0 — preventing spurious
+             * same-seg cRELOC records that stock doesn't emit for
+             * ORCALib's `L:~str` / `L:~orVal` patterns. */
             }
         else {
             v = sym->value;

@@ -131,8 +131,15 @@ for (;;) {
 
     /* --- Pushes ------------------------------------------------------- */
     if (op == EXPR_PC) {
+        /* `*` (current PC) is a relocatable value — at load time it
+         * equals seg_base + offset (stock exp.asm:1367 `sta stack+4`
+         * sets the reloc flag). Without this, `(*) >> 16` for bank-
+         * byte extraction evaluates as non-reloc and drops the
+         * cRELOC stock emits (4 missing records in kern KERN2).
+         * lastSeg is left unset — result is same-seg so pass2 emits
+         * it as a type=0 cRELOC, not INTERSEG. */
         if (top < EXPR_STACK_DEPTH) {
-            relocBits = relocBits << 1;
+            relocBits = (relocBits << 1) | 1;
             stack[top++] = pc;
             }
         continue;

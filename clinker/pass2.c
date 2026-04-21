@@ -341,10 +341,23 @@ for (;;) {
             buf[i] = (byte)(storeVal >> (i * 8));
         EmitData(out, buf, (long)pLen);
         if (needsReloc) {
+            /* pLen=4 INTERSEG compaction (stock pass2.asm:934 + DictInterseg
+             * ss1 path): a 4-byte pointer whose upper byte is zero compacts
+             * to a 3-byte cINTERSEG — the target-seg number goes in byte 2
+             * of the patch area; byte 3 of the LCONST stays 0 (EmitData
+             * already wrote it that way). SUPER-packable as INTERSEG1..12.
+             * Wc hits this for every __sclose/__sread/__sseek/__swrite
+             * pointer in the stdio FILE struct (12 per wc link). Only
+             * valid for shift==0. */
+            byte relocLen = pLen;
+            if (pLen == 4 && shiftByte == 0 &&
+                segOut != 0 && segOut != out->segNum &&
+                ((storeVal >> 24) & 0xFF) == 0)
+                relocLen = 3;
             if (segOut != 0 && segOut != out->segNum)
-                AppendReloc(out, pc, pLen, shiftByte, storeVal, 1, segOut, 1);
+                AppendReloc(out, pc, relocLen, shiftByte, storeVal, 1, segOut, 1);
             else
-                AppendReloc(out, pc, pLen, shiftByte, storeVal, 0, 0, 0);
+                AppendReloc(out, pc, relocLen, shiftByte, storeVal, 0, 0, 0);
             }
         pc += pLen;
         }
@@ -414,10 +427,16 @@ for (;;) {
             buf[i] = (byte)(storeVal >> (i * 8));
         EmitData(out, buf, (long)pLen);
         if (needsReloc) {
+            /* Same pLen=4 → pLen=3 INTERSEG compaction as OP_EXPR above. */
+            byte relocLen = pLen;
+            if (pLen == 4 && shiftByte == 0 &&
+                segOut != 0 && segOut != out->segNum &&
+                ((storeVal >> 24) & 0xFF) == 0)
+                relocLen = 3;
             if (segOut != 0 && segOut != out->segNum)
-                AppendReloc(out, pc, pLen, shiftByte, storeVal, 1, segOut, 1);
+                AppendReloc(out, pc, relocLen, shiftByte, storeVal, 1, segOut, 1);
             else
-                AppendReloc(out, pc, pLen, shiftByte, storeVal, 0, 0, 0);
+                AppendReloc(out, pc, relocLen, shiftByte, storeVal, 0, 0, 0);
             }
         pc += pLen;
         }

@@ -223,9 +223,10 @@ if (sign == '+') {
 
 void SetBaseName(void)
 {
-/* Extract the last path component, strip extension */
+/* Extract the last path component, strip extension. Case is preserved —
+ * the .symbols JSON `target` field mirrors the case the user typed in
+ * `keep=` (stock outputs "wc" for `keep=wc`, not "WC"). */
 char *slash, *dot;
-int i;
 
 strncpy(baseName, keepName, PATH_MAX - 1);
 slash = strrchr(baseName, '/');
@@ -235,10 +236,6 @@ if (slash)
 
 dot = strrchr(baseName, '.');
 if (dot) *dot = 0;
-
-/* Uppercase */
-for (i = 0; baseName[i]; i++)
-    baseName[i] = (char)toupper((int)baseName[i]);
 }
 
 /* Open an input file (or stem with sibling-family ROOT/.a/.B search)

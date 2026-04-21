@@ -84,13 +84,17 @@ fprintf(fp, "\"segments\":[");
 for (seg = outSegs; seg; seg = seg->next) {
     if (!first) fprintf(fp, ",");
     first = FALSE;
+    /* `name` is the merged load-seg name (the LOADNAME key), NOT the
+     * first input seg's SEGNAME — matches the SEGNAME field written
+     * into the output OMF by OmfWriteSegHeader and matches stock's
+     * .symbols output. */
     fprintf(fp,
         "{\"number\":\"0x%04X\","
          "\"name\":\"%s\","
          "\"type\":\"%s\","
          "\"org\":\"0x%08lX\","
          "\"length\":\"0x%08lX\"}",
-        PostExprSegNum(seg->segNum), seg->segName,
+        PostExprSegNum(seg->segNum), seg->loadName,
         SegTypeString(seg->segType),
         seg->org, seg->dataLen);
     }
@@ -110,12 +114,19 @@ for (i = 0; i < SYM_HASH_SIZE; i++) {
         if (sym->flags & SYM_IS_SEGMENT)        continue;
         if (!first) fprintf(fp, ",");
         first = FALSE;
+        /* Stock emits the PRE-ExpressLoad-remap segnum in the
+         * symbols array (documented in gsplusSymbols.md as a
+         * known quirk: symbols['].segment differs from
+         * segments[].number by 1 when opt_express). Match stock
+         * so external consumers like GSplus and SourceGen parse
+         * the same shape regardless of which linker wrote the
+         * file. */
         fprintf(fp,
             "{\"name\":\"%s\","
              "\"segment\":\"0x%04X\","
              "\"offset\":\"0x%08lX\","
              "\"global\":%s}",
-            sym->name, PostExprSegNum(sym->segNum), sym->value,
+            sym->name, sym->segNum, sym->value,
             (sym->flags & SEGKIND_PRIVATE) ? "false" : "true");
         }
     }

@@ -331,17 +331,11 @@ int dataArea = 0;
  * already-accumulated out->length, so we can grow that AFTER. */
 out = FindOrCreateOutSeg(seg->loadName, seg->segName, seg->segkind);
 
-/* GSplus WDM prologue reservation: when opt_gsplus, pass2 prepends an
- * 8-byte prologue to the very first output segment (outSegs head).
- * If we don't account for that prefix during pass1, every LOCAL/GLOBAL
- * symbol defined in that output seg will have a value 8 bytes short of
- * its post-injection position, and every reloc that references one of
- * those symbols resolves to the wrong address at load time. Pre-bump
- * out->length by 8 the FIRST time we see this output seg so all
- * subsequent baseOffset/symbol/reloc calculations see the shifted
- * layout. */
-if (opt_gsplus && out == outSegs && out->length == 0)
-    out->length = 8;
+/* gsplusSymbols=1 used to also pre-advance out->length by 8 here to
+ * reserve space for a WDM prologue injected by pass2. The prologue
+ * is no longer emitted (clinker's gsplusSymbols mode now writes only
+ * the .symbols / .sym65 sidecars), so symbols land at their natural
+ * offsets. */
 
 /* Assign data-area number for DATA-kind input segments. Stock's
  * seg.asm:1156 bumps lastDataNumber per DATA input seg — counter is

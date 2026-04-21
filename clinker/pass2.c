@@ -521,30 +521,21 @@ OutSeg    *out;
 /* Allocate data buffers for all output segments */
 for (out = outSegs; out; out = out->next) {
     if (out->length > 0) {
-        out->data = (byte *)malloc((size_t)out->length + 8);
+        out->data = (byte *)malloc((size_t)out->length);
         if (!out->data) FatalError("out of memory (segment buffer)");
-        memset(out->data, 0, (size_t)out->length + 8);
+        memset(out->data, 0, (size_t)out->length);
         out->dataLen   = 0;
-        out->dataAlloc = out->length + 8;
+        out->dataAlloc = out->length;
         }
     }
 
-/* GSplus: inject WDM prologue into segment 1 */
-if (opt_gsplus) {
-    OutSeg *first = outSegs;
-    if (first && first->data) {
-        byte prologue[8];
-        prologue[0] = 0x42;                        /* WDM       */
-        prologue[1] = 0x0F;                        /* $0F       */
-        prologue[2] = 0x80;                        /* BRA       */
-        prologue[3] = 0x04;                        /* +4        */
-        prologue[4] = (byte)(sfSig);               /* sig lo    */
-        prologue[5] = (byte)(sfSig >> 8);
-        prologue[6] = (byte)(sfSig >> 16);
-        prologue[7] = (byte)(sfSig >> 24);         /* sig hi    */
-        EmitData(first, prologue, 8L);
-        }
-    }
+/* The gsplusSymbols=1 flag used to inject an 8-byte WDM-trap
+ * prologue (42 0F 80 04 <sfSig-LE>) at the head of the first
+ * output segment so the GSplus emulator could bind a running image
+ * to its .symbols sidecar on the first instruction fetch. That
+ * behaviour has been removed by request — the flag now only emits
+ * the .symbols / .sym65 sidecars; the binary is byte-identical
+ * with and without it. */
 
 /* Process each input segment */
 for (inf = inputFiles; inf; inf = inf->next) {

@@ -34,9 +34,9 @@ iix link -DgsplusSymbols=1 ...      # WRONG — linker does not understand -D
 The variable name `gsplusSymbols` is **case-sensitive** — it must match
 exactly.
 
-When the variable is unset or empty, no symbol file is written and no
-WDM prologue is injected into the binary. When the variable is set, both
-outputs are produced together.
+When the variable is unset or empty, no symbol file is written. When
+the variable is set, the `.symbols` sidecar is produced alongside the
+linked binary. The binary itself is unaffected by this flag.
 
 ## Output file
 
@@ -51,12 +51,26 @@ iix -DgsplusSymbols=1 link foo.a keep=MyProg
 
 If no `keep=` is specified (no output file), no symbol file is created.
 
-## WDM prologue injected into the binary
+## Binary is unchanged by this flag
 
-When `gsplusSymbols` is set, the linker injects an 8-byte prologue at the
-very start of the first OMF code segment (segment 1). This prologue fires
-the WDM trap when the binary begins executing, signalling the emulator to
-bind the symbol table to the loaded binary.
+`gsplusSymbols` is now a **sidecar-only** flag. Setting it causes
+the linker to write the `.symbols` (and `.sym65`) files alongside
+the binary, but the binary itself is byte-identical to a build
+without the flag.
+
+Earlier versions of this spec described an 8-byte WDM-trap prologue
+(`$42 $0F $80 $04 <sig-LE>`) that clinker/stock injected at the
+start of the first output segment, letting GSplus bind the running
+image to a matching `.symbols` by trapping on the first fetch.
+That injection has been removed from clinker at user request; the
+text is kept below for reference if you need to add the behaviour
+back to a fork.
+
+<details>
+<summary>Historical: removed WDM prologue behaviour</summary>
+
+When the flag was set, the linker used to inject an 8-byte prologue
+at the very start of the first OMF code segment:
 
 ```
 Offset 0–1:  $42 $0F   WDM $0F  — traps to the emulator
@@ -65,30 +79,16 @@ Offset 4–7:  <sig>     32-bit link signature (little-endian)
 Offset 8+:              actual user code
 ```
 
-All pass-1 symbol offsets in segment 1 are automatically shifted by 8 to
-account for the prologue, so no relocation entries are disturbed.
+Pass-1 symbol offsets in the first segment were auto-shifted by 8
+to account for the prologue. GSplus bound symbols at WDM $0F by
+reading the 4 bytes at PC+4 and looking up the matching `.symbols`
+by `symsig`.
 
-### Signature generation
+The `symsig` field is still emitted in the JSON (a rotate-7/XOR
+hash of the output basename) for callers that want to track builds
+across runs, but nothing in the binary carries it.
 
-The 32-bit signature (`symsig`) is computed at link time:
-
-1. The tick counter (`GetTick`, Misc Tools) seeds a 32-bit value.
-2. Each character of the output basename is mixed in: rotate the value
-   left 7 bits, then XOR with the character byte.
-
-The result changes on every link run of the same file (different ticks)
-and differs across files with different names (different hash). It is
-stored little-endian in the binary at offsets 4–7 of the prologue.
-
-### How GSplus binds symbols
-
-1. **At reset/restart:** GSplus walks the file root, opens every file
-   whose name ends in `.symbols`, reads the `symsig` field, and builds
-   an in-memory index keyed by signature value.
-2. **At WDM $0F trap:** the emulator reads the 4 bytes at `[PC+4]`
-   (immediately after the BRA instruction) as a little-endian 32-bit
-   integer, looks it up in the signature index, and binds that symbol
-   table to the segment currently loading.
+</details>
 
 ## JSON format
 
@@ -111,7 +111,7 @@ newline). The top-level object has these fields:
 | Field | Type | Description |
 |-------|------|-------------|
 | `orca_symbols_version` | string | Format version. Currently `"0x0001"`. |
-| `symsig` | string | 32-bit link signature as an 8-digit hex string (e.g. `"0x1A2B3C4D"`). Matches the value embedded in the binary prologue at offsets 4–7 (little-endian). |
+| `symsig` | string | 32-bit link signature as an 8-digit hex string (e.g. `"0x1A2B3C4D"`). Informational; nothing in the binary carries this value (the historical WDM prologue that embedded it has been removed). |
 | `target` | string | Base name of the linked binary (from the `keep=` argument). |
 | `linker` | string | Linker identification string including version. |
 | `segments` | array | Array of segment objects (see below). |
@@ -252,18 +252,19 @@ To resolve a runtime address to a symbol name:
 - The `orca_symbols_version` field allows for future format changes.
   Current version is `"0x0001"`. If the version is unrecognised, the
   emulator should ignore the file rather than crash.
-- `symsig` is a 32-bit value encoded as an 8-digit hex string with `0x`
-  prefix. The same value appears little-endian at bytes 4–7 of the WDM
-  prologue in the binary. To read it from the binary: treat the 4 bytes
-  starting at `PC+4` (where PC points to the WDM instruction) as a
-  little-endian 32-bit integer. That integer equals
-  `strtoul(symsig, NULL, 16)`.
-- Symbol names are stored in uppercase per ORCA convention (ORCA/M
-  assembler uppercases all identifiers). Source-level names like `main`
-  or `_helper` become `MAIN` and `_HELPER`.
-- All symbol `offset` values in segment 1 are ≥ 8 because the 8-byte
-  WDM prologue is at offsets 0–7. The first user symbol starts at
-  offset `0x00000008`.
+- `symsig` is a 32-bit value encoded as an 8-digit hex string with
+  `0x` prefix. It is a rotate-7/XOR hash of the output basename —
+  useful as a stable identifier per build target. Nothing in the
+  binary embeds it (the historical WDM prologue that did so has
+  been removed).
+- Symbol names are stored in their original case. ORCA/M assembler
+  uppercases all identifiers it emits (so asm sources produce
+  `MAIN`, `GETENV`, etc.); ORCA/C preserves case (so C sources
+  produce `main`, `getenv`, etc.). Libraries can mix both.
+- Symbol `offset` values are now the natural link-time offsets —
+  no 8-byte prologue shift is applied. The first user symbol in
+  segment 1 starts at offset `0x00000000` (or wherever the OMF
+  input places it).
 - The `segment` field in symbol objects refers to the segment number
   assigned during pass 1 of the link. This may differ from the final
   segment `number` in the segments array by 1 (due to the linker's

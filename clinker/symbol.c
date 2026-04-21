@@ -53,23 +53,23 @@ while (*name)
 return h % SYM_HASH_SIZE;
 }
 
-/* Per-file scoping is applied ONLY to segment-name symbols (~GLOBALS,
- * ~ARRAYS, per-file autogen data areas). Stock tags those private per
- * (name, fileNumber); a flat table collapses all 16 files' ~GLOBALS
- * into one entry and bank-setup (~GLOBALS>>8) patches resolve to the
- * wrong bank.
+/* Per-file scoping is applied to ALL private symbols. Stock tags
+ * private symbols per (name, fileNumber); a flat table collapses
+ * same-name LOCAL/EQU/segment entries across files, so bank-setup
+ * patches, data-area refs, and library-generated helpers all resolve
+ * to the wrong owner.
  *
- * Non-segment private symbols (LOCAL, EQU) are NOT scoped per-file.
- * Stock's Define (symbol.asm:281-285) only enters private defines
- * into the table for DATA segments (dataNumber != 0); code-segment
- * private defines are silently dropped. Clinker's matching filter
- * lives in pass1.c's DefineFromRecord. */
+ * The table stays manageable because pass1.c's DefineFromRecord
+ * mirrors stock's Define (symbol.asm:281-285) and silently drops
+ * LOCAL/EQU defined in code segments (where dataNumber == 0). Only
+ * DATA-segment LOCAL/EQU and every file's SYM_IS_SEGMENT autogen
+ * entry actually land in the hash. */
 Symbol *SymFind(const char *name, int fileNum)
 {
 Symbol *s;
-Symbol *public_match   = NULL;
-Symbol *any_seg_match  = NULL;
-Symbol *unresolved     = NULL;   /* pass1-requested placeholder */
+Symbol *public_match    = NULL;
+Symbol *any_priv_match  = NULL;
+Symbol *unresolved      = NULL;   /* pass1-requested placeholder */
 unsigned int h = SymHash(name);
 
 for (s = symHash[h]; s; s = s->next) {
@@ -80,18 +80,19 @@ for (s = symHash[h]; s; s = s->next) {
         if (!unresolved) unresolved = s;
         continue;
         }
-    if ((s->flags & SYM_IS_SEGMENT) && (s->flags & SEGKIND_PRIVATE)) {
+    if (s->flags & SEGKIND_PRIVATE) {
         if (fileNum != 0 && s->fileNum == fileNum) return s;
         /* Last-encountered in chain walk = first-defined (chain is
          * LIFO). Matches what stock's kernel link resolves to for
-         * sys.root's cross-file `~GLOBALS` reference. */
-        any_seg_match = s;
+         * sys.root's cross-file `~GLOBALS` reference when no private-
+         * fileNum match exists. */
+        any_priv_match = s;
         continue;
         }
     if (!public_match) public_match = s;
     }
-if (public_match)  return public_match;
-if (any_seg_match) return any_seg_match;
+if (public_match)    return public_match;
+if (any_priv_match)  return any_priv_match;
 return unresolved;
 }
 
@@ -113,11 +114,9 @@ Symbol *SymDefine(const char *name, long value, int segNum, int flags,
 {
 Symbol *s;
 unsigned int h;
-/* Only segment-name private symbols get their own per-file entry.
- * Everything else (public globals, non-segment private) uses one
- * shared entry per name. */
-int scopePerFile = ((flags & SYM_IS_SEGMENT) &&
-                    (flags & SEGKIND_PRIVATE)) ? 1 : 0;
+/* Any private symbol gets its own per-file entry; public symbols
+ * share a single entry per name. */
+int scopePerFile = (flags & SEGKIND_PRIVATE) ? 1 : 0;
 int keyFile      = scopePerFile ? fileNum : 0;
 
 s = SymFindExact(name, keyFile, scopePerFile);

@@ -541,17 +541,17 @@ for (inf = inputFiles; inf; inf = inf->next) {
     }
 
 /* GSplus symbol-binding footer. After pass 2 has written every
- * byte the inputs contribute, append a 26-byte trailer to each
+ * byte the inputs contribute, append a 19-byte trailer to each
  * CODE output segment's LCONST:
  *
- *   bytes 0..16  "__GSPLUSSYMBOLS__"  (17-byte ASCII magic)
- *   bytes 17..20 sfSig                (little-endian 32-bit, matches
+ *   bytes 0..9   "_$GSPSYM$_"         (10-byte ASCII magic)
+ *   bytes 10..13 sfSig                (little-endian 32-bit, matches
  *                                      the .symbols JSON "symsig" field)
- *   bytes 21..24 total LCONST length  (little-endian 32-bit, includes
+ *   bytes 14..17 total LCONST length  (little-endian 32-bit, includes
  *                                      this footer — so GSplus can back-
  *                                      compute seg_base = marker_end -
  *                                      length)
- *   byte  25     segNum               (pre-ExpressLoad-remap segment
+ *   byte  18     segNum               (pre-ExpressLoad-remap segment
  *                                      number, 1..N; matches the
  *                                      symbols[].segment field in the
  *                                      .symbols JSON so a scanner can
@@ -570,24 +570,24 @@ for (inf = inputFiles; inf; inf = inf->next) {
  * breaks things (confirmed: kernel ~_STACK at type 0x12 crashed
  * when a footer was emitted there). */
 if (opt_gsplus) {
-    static const char magic[17] = "__GSPLUSSYMBOLS__";
+    static const char magic[10] = "_$GSPSYM$_";
     for (out = outSegs; out; out = out->next) {
-        byte footer[26];
+        byte footer[19];
         long total;
         int  i;
         if ((out->segType & 0x1F) != 0x00) continue;   /* CODE only */
-        total = out->dataLen + 26;
-        for (i = 0; i < 17; i++) footer[i] = (byte)magic[i];
-        footer[17] = (byte)(sfSig);
-        footer[18] = (byte)(sfSig >> 8);
-        footer[19] = (byte)(sfSig >> 16);
-        footer[20] = (byte)(sfSig >> 24);
-        footer[21] = (byte)(total);
-        footer[22] = (byte)(total >> 8);
-        footer[23] = (byte)(total >> 16);
-        footer[24] = (byte)(total >> 24);
-        footer[25] = (byte)(out->segNum);
-        EmitData(out, footer, 26L);
+        total = out->dataLen + 19;
+        for (i = 0; i < 10; i++) footer[i] = (byte)magic[i];
+        footer[10] = (byte)(sfSig);
+        footer[11] = (byte)(sfSig >> 8);
+        footer[12] = (byte)(sfSig >> 16);
+        footer[13] = (byte)(sfSig >> 24);
+        footer[14] = (byte)(total);
+        footer[15] = (byte)(total >> 8);
+        footer[16] = (byte)(total >> 16);
+        footer[17] = (byte)(total >> 24);
+        footer[18] = (byte)(out->segNum);
+        EmitData(out, footer, 19L);
         }
     }
 

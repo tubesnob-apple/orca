@@ -55,35 +55,35 @@ If no `keep=` is specified (no output file), no symbol file is created.
 
 ## Per-segment footer (binary-scannable marker)
 
-When `gsplusSymbols` is set, clinker appends a **26-byte footer** to
+When `gsplusSymbols` is set, clinker appends a **19-byte footer** to
 the LCONST of every **CODE** output segment. The footer is never
 executed — it sits past the last byte of segment code.
 
 ```
-Offset 0..16   "__GSPLUSSYMBOLS__"   17-byte ASCII magic
-Offset 17..20  sfSig                  4-byte little-endian 32-bit
-                                      (matches the .symbols "symsig")
-Offset 21..24  LCONST total length    4-byte little-endian 32-bit
-                                      (includes this footer)
-Offset 25      segNum                 1-byte pre-ExpressLoad-remap
-                                      segment number (1..N, matches
-                                      the .symbols JSON
-                                      symbols[].segment field)
+Offset 0..9    "_$GSPSYM$_"           10-byte ASCII magic
+Offset 10..13  sfSig                   4-byte little-endian 32-bit
+                                       (matches the .symbols "symsig")
+Offset 14..17  LCONST total length     4-byte little-endian 32-bit
+                                       (includes this footer)
+Offset 18      segNum                  1-byte pre-ExpressLoad-remap
+                                       segment number (1..N, matches
+                                       the .symbols JSON
+                                       symbols[].segment field)
 ```
 
 At load time, each CODE segment's LCONST — including the footer —
 lands in emulator RAM at `seg_base .. seg_base + LCONST_length - 1`.
-The magic string lives at `seg_base + LCONST_length - 26`.
+The magic string lives at `seg_base + LCONST_length - 19`.
 
 ### How GSplus binds symbols with this
 
-1. **Scan memory** for the 17-byte `__GSPLUSSYMBOLS__` magic. Each
-   hit identifies one loaded code segment.
+1. **Scan memory** for the 10-byte `_$GSPSYM$_` magic. Each hit
+   identifies one loaded code segment.
 2. At hit address `X`, read:
-   - `sfSig  = readLE32(X + 17)`
-   - `length = readLE32(X + 21)`
-   - `segNum = readU8  (X + 25)`
-3. Compute `seg_base = (X + 26) - length`. The segment's first
+   - `sfSig  = readLE32(X + 10)`
+   - `length = readLE32(X + 14)`
+   - `segNum = readU8  (X + 18)`
+3. Compute `seg_base = (X + 19) - length`. The segment's first
    byte lives at that address.
 4. Open the `.symbols` sidecar whose `symsig` field equals `sfSig`.
    Filter `symbols[]` to entries whose `segment` matches `segNum`.
@@ -111,9 +111,9 @@ trap required.
   `outSegs` at footer-emit time.
 - **Symbol offsets are natural.** No +8 prologue shift; symbol
   offsets in `.symbols` match the binary's pre-load layout.
-- **Cost:** 26 bytes per code segment. For a typical GNO utility
-  (3–5 code segs) that's +78 to +130 bytes of binary size. For the
-  GNO kernel (KERN2 + blank-seg + KERN3 = 3 code segs), +78 bytes.
+- **Cost:** 19 bytes per code segment. For a typical GNO utility
+  (3–5 code segs) that's +57 to +95 bytes of binary size. For the
+  GNO kernel (KERN2 + blank-seg + KERN3 = 3 code segs), +57 bytes.
 
 <details>
 <summary>Historical: removed WDM prologue behaviour (earlier design)</summary>
